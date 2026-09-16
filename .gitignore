@@ -1,0 +1,18 @@
+# Derleme çıktıları
+bin/
+obj/
+
+# Visual Studio / Rider kullanıcı dosyaları
+.vs/
+.idea/
+*.user
+*.suo
+
+# YEREL SIRLAR - depoya ASLA girmemeli.
+# Slack webhook'u gibi gerçek değerler burada durur, paylaşılan
+# appsettings.json'da boş kalır (bkz. Program.cs, README "Slack bildirimi").
+appsettings.Local.json
+
+# Araç/çalışma artıkları
+.scratch/
+.claude/

@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SQL izleme</title>
+
+    <!-- Tema tercihini CSS'ten ÖNCE, sayfa hiç boyanmadan uyguluyoruz.
+         app.js'in sonunda çalışmasını beklesek, bir anlığına yanlış
+         temayla çizilip sonra sıçrayan ("flaş") bir ekran görürdün. -->
+    <script>
+        (function () {
+            // Varsayılan KOYU: hiç tercih kaydedilmemişse (ilk açılış)
+            // işletim sistemini izlemek yerine doğrudan koyu temayla
+            // açılır. "Sistem" hâlâ seçilebilir bir seçenek - kullanıcı
+            // üst çubuktan elle seçtiğinde işletim sistemini izlemeye
+            // başlar, ama bu artık VARSAYILAN değil.
+            //
+            // localStorage bazı gizlilik modlarında erişimi tamamen
+            // reddedebilir - o durumda sayfa sessizce koyu temaya
+            // düşsün, hata fırlatıp sayfayı boş bırakmasın.
+            try {
+                var saved = localStorage.getItem('sqlmonitor-theme');
+                if (saved !== 'system') {
+                    document.documentElement.dataset.theme =
+                        (saved === 'light' || saved === 'dark') ? saved : 'dark';
+                }
+            } catch (e) {
+                document.documentElement.dataset.theme = 'dark';
+            }
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+          rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+    <div class="topbar-identity">
+        <span class="mark" aria-hidden="true"></span>
+        <h1>SQL izleme</h1>
+    </div>
+
+    <div class="topbar-controls">
+        <label class="field">
+            <span>Sunucu</span>
+            <select id="instanceSelect"></select>
+        </label>
+
+        <!-- appsettings.json'a dokunmadan sunucu ekle/düzenle/sil -
+             bkz. app.js loadInstanceManager ve Api/InstanceManagementEndpoints.cs. -->
+        <button id="manageInstances" type="button" class="btn btn-quiet" title="Sunucuları yönet">⚙ Sunucular</button>
+
+        <label class="field">
+            <span>Yenileme</span>
+            <select id="intervalSelect">
+                <option value="0">Duraklat</option>
+                <option value="1">1 saniye</option>
+                <option value="5" selected>5 saniye</option>
+                <option value="10">10 saniye</option>
+                <option value="30">30 saniye</option>
+                <option value="60">1 dakika</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Tema</span>
+            <select id="themeSelect">
+                <option value="dark" selected>Koyu</option>
+                <option value="light">Açık</option>
+                <option value="system">Sistem</option>
+            </select>
+        </label>
+
+        <button id="refreshNow" type="button" class="btn">Şimdi yenile</button>
+
+        <!-- Yalnızca RequiresLogin=true olan (canlı/Prod) bir instance
+             seçiliyken ve kilit açıkken görünür - bkz. app.js updateLogoutButton. -->
+        <button id="authLogout" type="button" class="btn btn-quiet" hidden>Çıkış yap (canlı)</button>
+
+        <p class="stamp">
+            <span id="lastUpdate">Bağlanılıyor</span>
+            <span id="pulse" class="pulse" aria-hidden="true"></span>
+        </p>
+    </div>
+</header>
+
+<!-- Hero: ham sayı değil, hüküm. Sayfaya bakan kişinin ilk sorusu
+     "sunucu iyi mi" ve "önce neye bakayım" - ikisini de burada cevaplıyoruz. -->
+<section class="verdict" id="verdict" aria-live="polite">
+    <div class="verdict-state">
+        <p class="verdict-server" id="verdictServer">—</p>
+        <p class="verdict-line" id="verdictLine">Veri bekleniyor</p>
+        <div class="verdict-tags" id="verdictTags"></div>
+    </div>
+
+    <div class="verdict-gauge">
+        <div class="gauge" id="gauge">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="track" cx="60" cy="60" r="50"></circle>
+                <circle class="value" id="gaugeArc" cx="60" cy="60" r="50"
+                        stroke-dasharray="0 314"></circle>
+            </svg>
+            <div class="gauge-center">
+                <span class="gauge-number" id="scoreValue">—</span>
+                <span class="gauge-caption">üretim sağlığı</span>
+            </div>
+        </div>
+        <div class="score-breakdown" id="scoreBreakdown"></div>
+    </div>
+
+    <div class="verdict-next" id="verdictNext"></div>
+</section>
+
+<section class="kpi-strip" aria-label="Anlık göstergeler">
+    <header class="kpi-strip-head">
+        <h2 class="kpi-strip-title">Anlık göstergeler</h2>
+        <p class="kpi-strip-window" id="kpiWindow"></p>
+    </header>
+
+    <div class="kpis" id="kpis"></div>
+</section>
+
+<nav class="tabs" role="tablist">
+    <button class="tab is-active" role="tab" data-tab="overview">Genel bakış</button>
+    <button class="tab" role="tab" data-tab="activity">Aktivite</button>
+    <button class="tab" role="tab" data-tab="storedproc">Stored Procedure</button>
+    <button class="tab" role="tab" data-tab="indexanalysis">Index Analizi</button>
+    <button class="tab" role="tab" data-tab="alwayson">Always On</button>
+    <button class="tab" role="tab" data-tab="agentjobs">Agent Jobs</button>
+</nav>
+
+<p class="errors" id="errors" hidden></p>
+
+<main>
+    <!-- ---------------------------------------------------------- -->
+    <section class="panel-grid tabpanel is-active" data-panel="overview">
+        <article class="card" data-accent="cpu">
+            <header class="card-head">
+                <h2>CPU</h2>
+                <span class="badge" id="cpuBadge"></span>
+            </header>
+            <div id="cpuBody"></div>
+        </article>
+
+        <article class="card" data-accent="mem">
+            <header class="card-head">
+                <h2>Bellek</h2>
+                <span class="badge" id="memoryBadge"></span>
+            </header>
+            <div id="memoryBody"></div>
+        </article>
+
+        <article class="card" data-accent="tempdb">
+            <header class="card-head">
+                <h2>tempdb</h2>
+                <span class="badge" id="tempdbBadge"></span>
+            </header>
+            <div id="tempdbBody"></div>
+        </article>
+
+        <article class="card" data-accent="disk">
+            <header class="card-head">
+                <h2>Disk</h2>
+                <span class="badge" id="diskBadge"></span>
+            </header>
+            <div id="diskBody"></div>
+        </article>
+
+        <article class="card card-wide" data-accent="health">
+            <header class="card-head">
+                <h2>Sağlık kontrolleri</h2>
+                <p class="card-note">Çözüm sırasına göre: en çok puan götüren üstte</p>
+            </header>
+            <ul class="checks" id="checks"></ul>
+        </article>
+
+        <article class="card card-wide">
+            <header class="card-head">
+                <h2>Olaylar</h2>
+                <p class="card-note">Son 24 saatteki durum değişiklikleri</p>
+            </header>
+            <ol class="timeline" id="timeline"></ol>
+        </article>
+
+        <!-- En altta, bilerek: satır sayısı her saniye değişebiliyor (kaç
+             farklı bekleme türü eşiği geçtiyse o kadar satır) - kart
+             yüksekliği oynadıkça ÜSTÜNDEKİ her şeyi yukarı/aşağı kaydırırdı.
+             Sayfanın en sonunda olduğu için artık kaydıracak bir şey yok. -->
+        <article class="card card-wide" data-accent="wait">
+            <header class="card-head">
+                <h2>Bekleme</h2>
+                <p class="card-note">gürültü filtrelenmiş, iki örnekleme arası</p>
+            </header>
+            <div id="waitsBody"></div>
+
+            <!-- mon.WaitSample geçmişinden - snapshot'a bindirilmemiş,
+                 bkz. app.js loadWaitTrend. Ayrı bir "yenile"si yok, sayfa
+                 açılışında/sunucu değişince bir kez yüklenir - geçmiş
+                 zaten yavaş değişir. -->
+            <h3 class="tq-subhead">Son 6 saat - en çok yükte olanlar</h3>
+            <div id="waitTrendBody"></div>
+        </article>
+    </section>
+
+    <!-- ---------------------------------------------------------- -->
+    <section class="panel-grid tabpanel" data-panel="activity">
+        <article class="card card-wide">
+            <header class="card-head">
+                <h2>Bloklama</h2>
+                <span class="badge" id="blockingBadge"></span>
+            </header>
+            <div id="blockingBody"></div>
+        </article>
+
+        <article class="card card-wide">
+            <header class="card-head">
+                <h2>Çalışan istekler</h2>
+                <p class="card-note">Satıra tıklayınca sorgunun tamamı ve planı gelir</p>
+            </header>
+            <div class="table-wrap">
+                <table class="grid" id="requestsTable">
+                    <thead>
+                    <tr>
+                        <th class="num">SPID</th>
+                        <th>Veritabanı</th>
+                        <th>Durum</th>
+                        <th>Bekleme</th>
+                        <th class="num">Süre</th>
+                        <th class="num">CPU</th>
+                        <th class="num">Okuma</th>
+                        <th class="num">Blokçu</th>
+                        <th>Sorgu</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+
+    <!-- ---------------------------------------------------------- -->
+    <!-- Bilerek 1 saniyelik döngünün DIŞINDA - eksik index önerileri
+         dakikalar içinde önemli ölçüde değişmez, sekme ilk açıldığında
+         bir kez yüklenir. -->
+    <section class="panel-grid tabpanel" data-panel="indexanalysis">
+        <article class="card card-wide" data-accent="index">
+            <header class="card-head">
+                <h2>Index Analizi</h2>
+                <p class="card-note">Eksik index önerileri — sys.dm_db_missing_index_*</p>
+            </header>
+
+            <div class="tq-toolbar">
+                <p class="mi-subtab">Eksik index</p>
+                <button type="button" class="btn btn-quiet" id="miRefresh">↻ Yenile</button>
+            </div>
+
+            <p class="tq-status" id="miStatus" hidden></p>
+
+            <p class="tq-filter-note">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 9v4M12 16.3h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 2 3 6v6c0 5 3.8 8.5 9 10 5.2-1.5 9-5 9-10V6l-9-4Z"
+                          stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                Bu liste SQL Server'ın derleme sırasında biriktirdiği bir tahmindir; sunucu yeniden
+                başladığında sıfırlanır. Aynı tablo için üst üste binen birden çok öneri normaldir —
+                hepsini körü körüne oluşturmak yazma performansını düşürebilir; önce en yüksek etkiliye bak.
+            </p>
+
+            <div class="tq-stats" id="miStats"></div>
+
+            <div id="miHero"></div>
+
+            <h3 class="tq-subhead">Diğer öneriler</h3>
+            <div class="table-wrap">
+                <table class="grid" id="miTable">
+                    <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>Veritabanı / tablo</th>
+                        <th>Kolonlar</th>
+                        <th class="num">Etki</th>
+                        <th class="num">Seek</th>
+                        <th class="num">Ort. etki</th>
+                        <th class="num">Son seek</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+
+    <!-- ---------------------------------------------------------- -->
+    <!-- sys.dm_exec_query_stats İFADE bazında ölçer, bu DMV PROSEDÜR
+         bazında toplar. Bilerek 1 saniyelik döngünün DIŞINDA. -->
+    <section class="panel-grid tabpanel" data-panel="storedproc">
+        <article class="card card-wide" data-accent="proc">
+            <header class="card-head">
+                <h2>Stored Procedure</h2>
+                <p class="card-note">Prosedür bazında toplam yük — sys.dm_exec_procedure_stats</p>
+            </header>
+
+            <div class="tq-toolbar">
+                <div class="tq-sort" id="spSort" role="tablist" aria-label="Sıralama">
+                    <button type="button" class="is-active" data-sort="cpu">En çok CPU yoran</button>
+                    <button type="button" data-sort="avgduration">En uzun süren</button>
+                    <button type="button" data-sort="duration">Toplam süre</button>
+                    <button type="button" data-sort="calls">En çok çağrılan</button>
+                    <button type="button" data-sort="reads">Mantıksal okuma</button>
+                    <button type="button" data-sort="writes">Mantıksal yazma</button>
+                </div>
+                <button type="button" class="btn btn-quiet" id="spRefresh">↻ Yenile</button>
+            </div>
+
+            <p class="tq-status" id="spStatus" hidden></p>
+
+            <p class="tq-filter-note">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 2 3 6v6c0 5 3.8 8.5 9 10 5.2-1.5 9-5 9-10V6l-9-4Z"
+                          stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="2"
+                          stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                tempdb'de yaşayan prosedürler (izleme araçlarının geçici toplama rutinleri) bu listeden
+                çıkarıldı — yalnızca gerçek veritabanlarındaki prosedürler gösteriliyor.
+            </p>
+
+            <div class="tq-stats" id="spStats"></div>
+
+            <div id="spHero"></div>
+
+            <h3 class="tq-subhead">Diğer prosedürler</h3>
+            <div class="table-wrap">
+                <table class="grid" id="spTable">
+                    <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>Veritabanı / prosedür</th>
+                        <th class="num sortable-th" data-sort="calls">Çağrı</th>
+                        <th class="num sortable-th" data-sort="cpu">Toplam CPU</th>
+                        <th class="num sortable-th" data-sort="avgcpu">Ort. CPU</th>
+                        <th class="num sortable-th" data-sort="avgduration">Ort. süre</th>
+                        <th class="num sortable-th" data-sort="reads">Mant. okuma</th>
+                        <th class="num sortable-th" data-sort="reads">Toplam boyut</th>
+                        <th class="num sortable-th" data-sort="avgreads">Ort. okuma (sayfa)</th>
+                        <th class="num sortable-th" data-sort="avgreads">Ort. okuma (MB)</th>
+                        <th class="num sortable-th" data-sort="writes">Mant. yazma</th>
+                        <th class="num sortable-th" data-sort="avgwrites">Ort. yazma</th>
+                        <th class="num sortable-th" data-sort="duration">%</th>
+                        <th class="num sortable-th" data-sort="lastexecution">Son çalışma</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="card card-wide" data-accent="proc">
+            <header class="card-head">
+                <h2>Kullanılmayan Prosedürler</h2>
+                <p class="card-note">Plan cache + Query Store karşılaştırması — hiçbirinde görünmeyenler</p>
+            </header>
+
+            <div class="tq-toolbar">
+                <label class="im-checkbox im-checkbox-inline">
+                    <input type="checkbox" id="unusedStrongOnly">
+                    <span>Yalnızca güçlü kanıtı göster</span>
+                </label>
+                <button type="button" class="btn btn-quiet" id="unusedRefresh">↻ Yenile</button>
+            </div>
+
+            <p class="tq-status" id="unusedStatus" hidden></p>
+
+            <p class="tq-filter-note">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a1 1 0 0 0 .86 1.5h18.64a1 1 0 0 0 .86-1.5L13.71 3.86a1 1 0 0 0-1.72 0Z"
+                          stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                Bir prosedürün burada görünmesi "asla çalışmadı" değil, "bu gözlem penceresinde çalıştığına dair
+                kanıt bulunamadı" demektir — aşağıdaki her veritabanı notu, o kanıtın ne kadar güçlü olduğunu gösterir.
+            </p>
+
+            <div class="unused-dbnotes" id="unusedDbNotes"></div>
+
+            <div class="table-wrap">
+                <table class="grid" id="unusedTable">
+                    <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>Veritabanı / prosedür</th>
+                        <th class="num">Oluşturulma</th>
+                        <th class="num">Son değişiklik</th>
+                        <th>Kanıt</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+
+    <section class="panel-grid tabpanel" data-panel="alwayson">
+        <article class="card card-wide" data-accent="ag">
+            <header class="card-head">
+                <h2>Always On</h2>
+                <p class="card-note">AG grubu, replika ve veritabanı senkron sağlığı</p>
+            </header>
+
+            <div class="tq-toolbar">
+                <div></div>
+                <button type="button" class="btn btn-quiet" id="agRefresh">↻ Yenile</button>
+            </div>
+
+            <p class="tq-status" id="agStatus" hidden></p>
+
+            <div id="agNoGroup" class="empty" hidden>Bu sunucuda Always On Availability Group yapılandırılmamış.</div>
+
+            <div id="agContent" hidden>
+                <div class="ag-summary" id="agSummary"></div>
+
+                <h3 class="tq-subhead">Replikalar</h3>
+                <div class="ag-replicas" id="agReplicas"></div>
+
+                <h3 class="tq-subhead">Veritabanı bazında senkron durumu</h3>
+                <div class="table-wrap">
+                    <table class="grid" id="agDbTable">
+                        <thead>
+                        <tr>
+                            <th>Veritabanı</th>
+                            <th>Replika</th>
+                            <th>Senkron durumu</th>
+                            <th>Sağlık</th>
+                            <th class="num">Log gönderim kuyruğu</th>
+                        </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <!-- ---------------------------------------------------------- -->
+    <!-- Always On gibi bilerek 1 saniyelik döngünün DIŞINDA -
+         msdb.dbo.sysjobhistory büyük bir sunucuda çok satırlı olabilir,
+         sekme ilk açıldığında bir kez yüklenir. -->
+    <section class="panel-grid tabpanel" data-panel="agentjobs">
+        <article class="card card-wide" data-accent="jobs">
+            <header class="card-head">
+                <h2>Agent Jobs</h2>
+                <p class="card-note">SQL Server Agent job'larının son çalışma durumu</p>
+            </header>
+
+            <div class="tq-toolbar">
+                <div></div>
+                <button type="button" class="btn btn-quiet" id="jobsRefresh">↻ Yenile</button>
+            </div>
+
+            <p class="tq-status" id="jobsStatus" hidden></p>
+
+            <div class="ag-summary" id="jobsSummary"></div>
+
+            <div class="table-wrap">
+                <table class="grid" id="jobsTable">
+                    <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Kategori</th>
+                        <th>Son sonuç</th>
+                        <th>Son çalışma</th>
+                        <th class="num">Süre</th>
+                        <th>Mesaj</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+
+</main>
+
+<div class="drawer" id="drawer" hidden>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+        <header class="drawer-head">
+            <h2 id="drawerTitle">Sorgu</h2>
+            <button type="button" class="btn btn-quiet" id="drawerClose">Kapat</button>
+        </header>
+        <pre class="sqltext" id="drawerSql"></pre>
+
+        <!-- Yalnızca Index Analizi'nden açılan çekmecede dolar - bir CREATE
+             INDEX önerisinin yürütme planı yoktur, bunun yerine DMV'nin
+             kendi istatistikleri (seek/scan/etki) gösteriliyor. -->
+        <dl class="drawer-facts" id="drawerStatBox" hidden></dl>
+
+        <div id="drawerPlanSection">
+            <h3>Yürütme planı</h3>
+            <pre class="sqltext plan" id="drawerPlan"></pre>
+        </div>
+    </div>
+</div>
+
+<!-- KPI sparkline'larının hover ipucu: fareyle birlikte gezinen, sabit-
+     boyutlu tek bir kutu. Her grafik kendi tooltip'ini taşımıyor - dokuz
+     tanesi için dokuz eleman yerine tek, yeniden konumlanan bir eleman. -->
+<div class="spark-tip" id="sparkTip" hidden></div>
+
+<!-- RequiresLogin=true olan bir instance (Prod) seçiliyken ve kilit
+     henüz açılmamışken sayfanın üstünü kaplar - appsettings.json'da bu
+     sunucu için hiçbir kimlik bilgisi YOK, girişi SQL Server'ın kendisi
+     doğruluyor (bkz. app.js handleAuthSubmit, Api/AuthEndpoints.cs).
+     Kapatma/backdrop tıklaması BİLEREK yok - kilit yalnızca doğru giriş
+     ya da başka bir instance'a geçişle açılır. -->
+<div class="auth-gate" id="authGate" hidden>
+    <div class="auth-card">
+        <div class="auth-card-head">
+            <h2>Giriş gerekli</h2>
+            <!-- Vazgeçip sayfayı yenilemeden önceki sunucuya dönmek için -
+                 kapatma tıklaması sekmeyi asılı bırakmasın diye
+                 handleAuthCancel önce Sunucu seçicisini geri alır. -->
+            <button type="button" class="auth-close" id="authClose" aria-label="Kapat">×</button>
+        </div>
+        <p class="auth-sub"><b id="authInstanceName">Bu sunucu</b> için kullanıcı adı ve şifre gerekiyor.</p>
+        <form id="authForm">
+            <label class="auth-field">
+                <span>Kullanıcı adı</span>
+                <input type="text" id="authUsername" autocomplete="username" required>
+            </label>
+            <label class="auth-field">
+                <span>Şifre</span>
+                <input type="password" id="authPassword" autocomplete="current-password" required>
+            </label>
+            <p class="auth-error" id="authError" hidden></p>
+            <button type="submit" class="btn btn-index" id="authSubmit">Giriş yap</button>
+        </form>
+    </div>
+</div>
+
+<!-- Sunucu listesini appsettings.json'a hiç dokunmadan yönetmek için -
+     bkz. app.js loadInstanceManager/renderInstanceList/openInstanceForm
+     ve Api/InstanceManagementEndpoints.cs. -->
+<div class="instmgr" id="instMgr" hidden>
+    <div class="instmgr-panel">
+        <header class="drawer-head">
+            <h2>Sunucuları yönet</h2>
+            <button type="button" class="btn btn-quiet" id="instMgrClose">Kapat</button>
+        </header>
+
+        <p class="instmgr-note" id="instMgrUnmanagedNote" hidden>
+            İzleme veritabanına ulaşılamadığı için sunucu listesi bu ortamda yönetilemiyor -
+            appsettings.json'daki statik liste kullanılıyor.
+        </p>
+
+        <div class="instmgr-list" id="instMgrList"></div>
+
+        <button type="button" class="btn btn-index" id="instMgrAddNew">+ Yeni sunucu ekle</button>
+
+        <form id="instMgrForm" class="instmgr-form" hidden>
+            <h3 id="instMgrFormTitle">Yeni sunucu</h3>
+
+            <label class="auth-field">
+                <span>Anahtar (benzersiz, örn. TEST2 - sonradan değiştirilemez)</span>
+                <input type="text" id="imKey" maxlength="64" required>
+            </label>
+            <label class="auth-field">
+                <span>Görünen ad</span>
+                <input type="text" id="imDisplayName">
+            </label>
+            <label class="auth-field">
+                <span>Sunucu / IP</span>
+                <input type="text" id="imServer" required>
+            </label>
+            <label class="auth-field">
+                <span>Veritabanı</span>
+                <input type="text" id="imDatabase" placeholder="master">
+            </label>
+
+            <label class="im-checkbox">
+                <input type="checkbox" id="imRequiresLogin">
+                <span>Şifreyi burada saklama, uygulama açıldığında ekrandan sor</span>
+            </label>
+
+            <div id="imCredFields">
+                <label class="auth-field">
+                    <span>Kullanıcı adı <span class="field-hint">(boş bırakırsan Windows kimlik doğrulaması kullanılır)</span></span>
+                    <input type="text" id="imUserId" placeholder="boş = Windows kimlik doğrulaması">
+                </label>
+                <label class="auth-field">
+                    <span>Şifre</span>
+                    <input type="password" id="imPassword" placeholder="değiştirmek istemiyorsan boş bırak">
+                </label>
+            </div>
+
+            <label class="im-checkbox">
+                <input type="checkbox" id="imIsDefault">
+                <span>Varsayılan sunucu (uygulama açılınca bu seçili gelsin)</span>
+            </label>
+            <label class="im-checkbox">
+                <input type="checkbox" id="imAutoDiscover" checked>
+                <span>Always On replikalarını otomatik keşfet</span>
+            </label>
+
+            <!-- Yalnızca AG replikalarının kayıtlı adı DNS'ten çözülmediğinde
+                 gerekir (bkz. Services/InstanceRegistry.cs üstündeki not) -
+                 çoğu kurulumda boş bırakılabilir. -->
+            <label class="auth-field">
+                <span>AG replika adı → IP eşlemeleri (isteğe bağlı — yalnızca DNS çözmüyorsa)</span>
+                <input type="text" id="imReplicaOverrides" placeholder="ör. SQLNODE2=10.0.0.16;SQLNODE3=10.0.0.17">
+            </label>
+
+            <label class="im-checkbox">
+                <input type="checkbox" id="imSlackAlerts">
+                <span>Critical durumları Slack'e bildir</span>
+            </label>
+
+            <p class="auth-error" id="imError" hidden></p>
+
+            <div class="instmgr-form-actions">
+                <button type="button" class="btn btn-quiet" id="imCancel">Vazgeç</button>
+                <button type="submit" class="btn btn-index" id="imSave">Kaydet</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
