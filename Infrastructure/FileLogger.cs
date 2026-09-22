@@ -26,8 +26,22 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<string, FileLogger> _loggers = new();
 
-    /// <summary>Bu kadar günden eski günlükler açılışta silinir - disk izleyen bir araç kendi diskini doldurmamalı.</summary>
+    /// <summary>Bu kadar günden eski günlükler silinir - disk izleyen bir araç kendi diskini doldurmamalı.</summary>
     private const int RetentionDays = 14;
+
+    /// <summary>
+    /// BOM YAZMAYAN UTF-8. StreamWriter'ın varsayılanı BOM yazar; dosyanın
+    /// başında görünen "" karakteri hem gereksiz hem de grep/Select-String
+    /// ile arayan birinin ilk satırı kaçırmasına yol açar.
+    /// </summary>
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// Temizliğin en son hangi gün yapıldığı. Yalnızca açılışta temizlemek
+    /// YETMEZ: bu araç 7/24 açık kalmak üzere tasarlandı, aylarca yeniden
+    /// başlatılmayan bir kurulumda saklama süresi hiç uygulanmazdı.
+    /// </summary>
+    private DateOnly _lastPurgeDay = DateOnly.FromDateTime(DateTime.Now);
 
     public FileLoggerProvider(string directory)
     {
@@ -56,7 +70,8 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
         try
         {
-            var path = Path.Combine(_directory, $"sqlmonitor-{DateTime.Now:yyyyMMdd}.log");
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            var path = Path.Combine(_directory, $"sqlmonitor-{today:yyyyMMdd}.log");
 
             // FileShare.ReadWrite ŞART: uygulamanın ikinci bir kopyası
             // açılmaya çalıştığında (en tipik hata durumu - port meşgul)
@@ -65,9 +80,18 @@ public sealed class FileLoggerProvider : ILoggerProvider
             // hatası sessizce kayboluyordu - tam da okumak istediğimiz satır.
             lock (_gate)
             {
+                // Gün değiştiyse (gece yarısını geçen uzun süreli çalışma)
+                // eski dosyaları da burada temizliyoruz - yeniden başlatma
+                // beklemeden.
+                if (today != _lastPurgeDay)
+                {
+                    _lastPurgeDay = today;
+                    PurgeOldFiles(_directory);
+                }
+
                 using var stream = new FileStream(
                     path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                using var writer = new StreamWriter(stream, Encoding.UTF8);
+                using var writer = new StreamWriter(stream, Utf8NoBom);
                 writer.WriteLine(line);
             }
         }

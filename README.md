@@ -166,10 +166,18 @@ exe'nin içinde.
   kopya tarayıcıda gösterilir ve yeni süreç sessizce çıkar. (İki toplayıcının
   aynı veritabanına yazması engellenmiş olur.)
 - Durdurmak için: **Görev Yöneticisi > SqlMonitor.exe > Görevi sonlandır.**
-- Adres `appsettings.json` içindeki `Urls` ayarından gelir. Visual
-  Studio'dan F5 ile çalıştırırken bunun yerine
-  `Properties/launchSettings.json` geçerli olur; ikisi bilerek aynı portta.
-  **İkisini aynı anda çalıştırma** - ikincisi "port kullanımda" der.
+- Adres `appsettings.json > Monitor:ListenUrl` ayarından gelir. Portu
+  değiştirmenin üç yolu var, öncelik sırasıyla:
+
+  ```
+  SqlMonitor.exe --urls http://localhost:8080     (1)
+  set ASPNETCORE_URLS=http://localhost:8080       (2)
+  appsettings.json > Monitor:ListenUrl            (3, varsayılan)
+  ```
+
+  Visual Studio'dan F5 ile çalıştırırken `Properties/launchSettings.json`
+  geçerli olur; o da aynı portta. **İkisini aynı anda çalıştırma** -
+  ikincisi zaten açık sayılıp sessizce çıkar.
 - Uygulama oturum boyunca çalışır; bilgisayar kapanınca durur. Sürekli
   açık kalması gerekiyorsa (bildirimler ve geçmiş için gerekir) Windows
   Service olarak kurmak daha doğru.

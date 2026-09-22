@@ -7,6 +7,14 @@ public sealed class MonitorOptions
 {
     public const string SectionName = "Monitor";
 
+    /// <summary>
+    /// Uygulamanın dinleyeceği adres. `--urls` ya da `ASPNETCORE_URLS`
+    /// verilmişse ONLAR kazanır; burası yalnızca varsayılan (bkz. Program.cs).
+    /// Kestrel'e Program.cs veriyor, bu özellik yalnızca ayarın adı
+    /// koddan da görünsün diye burada - başka yerden okunmuyor.
+    /// </summary>
+    public string ListenUrl { get; set; } = "http://localhost:51900";
+
     /// <summary>İzleme verisinin yazıldığı SqlMonitorDb bağlantısı.</summary>
     public string StoreConnectionString { get; set; } = string.Empty;
 

@@ -21,14 +21,49 @@ using SqlMonitor.Services;
 // Mutex adı dinlenen adresi içeriyor: farklı portlara ayarlanmış iki
 // kurulum (örn. test) birbirini engellemesin.
 // ---------------------------------------------------------------------
+// Adres, konağın (host) kendi kurallarıyla AYNI sırada çözülmeli - yoksa
+// mutex adı ve tarayıcıda açılacak adres, uygulamanın gerçekte dinlediği
+// adresten farklı olabilir: ASPNETCORE_URLS ile başka bir porta alınmış
+// bir kurulumda ikinci kopya yanlış adrese tarayıcı açardı.
 var startupConfig = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: true)
     .AddJsonFile("appsettings.Local.json", optional: true)
-    .AddEnvironmentVariables()
     .Build();
 
-var configuredUrl = startupConfig["Urls"] ?? "http://localhost:5000";
+// Dinlenecek adres TEK bir yerde çözülüyor ve hem Kestrel'e hem de
+// aşağıdaki mutex/tarayıcı mantığına aynı değer veriliyor - ikisinin
+// ayrışması, "tarayıcı yanlış adresi açtı" gibi anlaşılmaz hatalara
+// yol açardı.
+//
+// Öncelik sırası bilerek STANDART yolları üstte tutuyor:
+//   1) --urls http://...        (komut satırı)
+//   2) ASPNETCORE_URLS          (ortam değişkeni, yaygın dağıtım yolu)
+//   3) Monitor:ListenUrl        (appsettings.json - bizim varsayılanımız)
+//
+// NOT: bu ayar eskiden appsettings.json'da "Urls" adıyla duruyordu ve
+// canlıda şu tuzak görüldü: ASP.NET Core'un kendi "Urls" anahtarı
+// appsettings'ten okununca ASPNETCORE_URLS'i EZİYOR, yani portu ortam
+// değişkeniyle değiştirmek sessizce çalışmıyordu. Kendi anahtarımıza
+// taşıyıp önceliği burada açıkça kurunca sorun ortadan kalkıyor.
+static string? ArgValue(string[] argv, string name)
+{
+    var i = Array.IndexOf(argv, name);
+    return i >= 0 && i + 1 < argv.Length ? argv[i + 1] : null;
+}
+
+var listenUrls =
+    ArgValue(args, "--urls")
+    ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+    ?? startupConfig["Monitor:ListenUrl"]
+    ?? "http://localhost:51900";
+
+// Birden fazla adres ";" ile verilebilir; tarayıcı/mutex için ilki yeterli.
+var configuredUrl = listenUrls.Split(';', StringSplitOptions.RemoveEmptyEntries)
+    .FirstOrDefault() ?? "http://localhost:51900";
+
+var noBrowser = args.Contains("--no-browser");
+
 var mutexName = "Local\\SqlMonitor_" +
     string.Concat(configuredUrl.Where(char.IsLetterOrDigit));
 
@@ -38,16 +73,26 @@ if (!isFirstInstance)
 {
     // Zaten çalışan kopyayı göster. Tarayıcı açılamazsa bile sessizce
     // çıkıyoruz - ikinci bir kopya başlatmak her hâlükârda yanlış olurdu.
-    try
+    // --no-browser burada da geçerli: "tarayıcı açma" dediyse, ikinci
+    // çift tıklamada da açmıyoruz.
+    if (!noBrowser)
     {
-        Process.Start(new ProcessStartInfo(configuredUrl) { UseShellExecute = true });
+        try
+        {
+            Process.Start(new ProcessStartInfo(configuredUrl) { UseShellExecute = true });
+        }
+        catch { /* tarayıcı açılamadı, yapacak bir şey yok */ }
     }
-    catch { /* tarayıcı açılamadı, yapacak bir şey yok */ }
 
     return 0;
 }
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Yukarıda çözülen adresi Kestrel'e veriyoruz - böylece uygulamanın
+// GERÇEKTEN dinlediği adres ile mutex/tarayıcı için kullandığımız adres
+// aynı olmak ZORUNDA, ayrışamaz.
+builder.WebHost.UseUrls(listenUrls);
 
 // Bağlantı dizeleri appsettings.json'da düz metin duruyor. Geliştirme
 // için sorun değil ama sunucuya kurarken bunları user-secrets'a veya
@@ -77,6 +122,7 @@ builder.Configuration.AddEnvironmentVariables();
 // yazan kendi dosya günlüğümüz - konsol olmayınca tek teşhis kaynağı o.
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+builder.Logging.AddDebug();   // Visual Studio'da F5 ile çalışırken Çıktı penceresi
 builder.Logging.AddProvider(new FileLoggerProvider(
     Path.Combine(AppContext.BaseDirectory, "logs")));
 
@@ -204,7 +250,7 @@ foreach (var instance in registry.Instances)
 //   --no-browser   : elle kapatmak isteyen için
 //   UserInteractive=false : Windows Service / arka plan olarak
 //     çalışıyorsak oturum yok, tarayıcı açmak anlamsız (ve hata verir).
-if (Environment.UserInteractive && !args.Contains("--no-browser"))
+if (Environment.UserInteractive && !noBrowser)
 {
     app.Lifetime.ApplicationStarted.Register(() =>
     {

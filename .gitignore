@@ -16,3 +16,6 @@ appsettings.Local.json
 # Araç/çalışma artıkları
 .scratch/
 .claude/
+
+# Çalışma zamanı günlükleri (exe'nin yanındaki logs/ klasörü)
+logs/
