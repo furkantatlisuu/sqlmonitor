@@ -560,6 +560,35 @@
 
         <button type="button" class="btn btn-index" id="instMgrAddNew">+ Yeni sunucu ekle</button>
 
+        <!-- Slack webhook'u BİLEREK burada, appsettings.json'da değil:
+             o dosya depoya ve paylaşılan zip'e giriyor. Adres izleme
+             veritabanında tutuluyor ve bir daha ekrana GERİ OKUNMUYOR -
+             yalnızca "kayıtlı mı" bilgisi gösteriliyor.
+             Bkz. Services/AppSettingStore.cs. -->
+        <section class="instmgr-slack">
+            <h3>Slack bildirimi</h3>
+            <p class="instmgr-slack-note" id="slackState">Durum okunuyor…</p>
+
+            <label class="auth-field">
+                <span>Webhook adresi <span class="field-hint">(kaydedildikten sonra bir daha gösterilmez)</span></span>
+                <input type="password" id="slackWebhook" placeholder="https://hooks.slack.com/services/...">
+            </label>
+
+            <div class="instmgr-slack-actions">
+                <button type="button" class="btn btn-index" id="slackSave">Kaydet</button>
+                <button type="button" class="btn btn-quiet" id="slackTest">Test mesajı gönder</button>
+                <button type="button" class="btn btn-quiet" id="slackClear">Kaldır</button>
+            </div>
+
+            <p class="auth-error" id="slackError" hidden></p>
+
+            <p class="instmgr-slack-note">
+                Hangi sunucunun bildirim göndereceğini yukarıdaki listeden,
+                o sunucuyu düzenleyip <b>“Critical durumları Slack'e bildir”</b>
+                kutusuyla seçersin.
+            </p>
+        </section>
+
         <form id="instMgrForm" class="instmgr-form" hidden>
             <h3 id="instMgrFormTitle">Yeni sunucu</h3>
 
@@ -575,11 +604,6 @@
                 <span>Sunucu / IP</span>
                 <input type="text" id="imServer" required>
             </label>
-            <label class="auth-field">
-                <span>Veritabanı</span>
-                <input type="text" id="imDatabase" placeholder="master">
-            </label>
-
             <label class="im-checkbox">
                 <input type="checkbox" id="imRequiresLogin">
                 <span>Şifreyi burada saklama, uygulama açıldığında ekrandan sor</span>
@@ -605,12 +629,13 @@
                 <span>Always On replikalarını otomatik keşfet</span>
             </label>
 
-            <!-- Yalnızca AG replikalarının kayıtlı adı DNS'ten çözülmediğinde
-                 gerekir (bkz. Services/InstanceRegistry.cs üstündeki not) -
-                 çoğu kurulumda boş bırakılabilir. -->
+            <!-- Yalnızca AG replikalarının adı DNS'ten çözülmediğinde gerekir
+                 (bkz. Services/InstanceRegistry.cs ParseReplicaHosts) - çoğu
+                 kurulumda boş bırakılabilir. Düz IP listesi yeterli: hangi
+                 adresin hangi sunucu olduğunu uygulama bağlanınca öğreniyor. -->
             <label class="auth-field">
-                <span>AG replika adı → IP eşlemeleri (isteğe bağlı — yalnızca DNS çözmüyorsa)</span>
-                <input type="text" id="imReplicaOverrides" placeholder="ör. SQLNODE2=10.0.0.16;SQLNODE3=10.0.0.17">
+                <span>Diğer replikaların adresleri <span class="field-hint">(isteğe bağlı — yalnızca AG varsa ve sunucu adları DNS'te çözülmüyorsa)</span></span>
+                <input type="text" id="imReplicaOverrides" placeholder="ör. 10.0.0.16;10.0.0.17">
             </label>
 
             <label class="im-checkbox">

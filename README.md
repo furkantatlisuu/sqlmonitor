@@ -1,4 +1,4 @@
-# SQL izleme — canlı monitör
+﻿# SQL izleme — canlı monitör
 
 .NET 8 üzerinde çalışan, SQL Server instance'larını canlı izleyen web uygulaması.
 Bu sürüm yalnızca **Canlı İzleme** ekranını kapsıyor.
@@ -94,33 +94,25 @@ izlemek için yeterli.
 
 ### 4. Slack bildirimi (isteğe bağlı)
 
-```json
-"Monitor": {
-  "SlackWebhookUrl": "https://hooks.slack.com/services/..."
-}
-```
+Webhook adresi **hiçbir dosyaya yazılmaz.** Uygulamayı aç, sağ üstten
+**"Sunucuları yönet"** → en alttaki **Slack bildirimi** bölümüne adresi
+yapıştır ve **Kaydet**'e bas. Adres izleme veritabanındaki
+`mon.AppSetting` tablosunda durur; ekrana bir daha asla geri okunmaz,
+yalnızca "kayıtlı" bilgisi gösterilir.
 
-Boş bırakılırsa bildirim özelliği tamamen kapalıdır (kod webhook'a
-hiç dokunmaz) - ayrı bir aç/kapa ayarı yok.
+**Test** düğmesi kanala anında örnek bir mesaj atar - adresin doğru
+çalıştığını kaydettiğin saniye görürsün. **Kaldır** adresi siler ve
+bildirimleri tamamen kapatır.
 
-> **Webhook'u `appsettings.json`'a YAZMA.** O dosya depoya giriyor;
-> webhook'u eline geçiren herkes kanalına mesaj atabilir. Gerçek değeri
-> `appsettings.Local.json` içine koy - bu dosya `.gitignore`'da, yalnızca
-> senin makinende durur ve `appsettings.json`'ı ezer:
->
-> ```json
-> { "Monitor": { "SlackWebhookUrl": "https://hooks.slack.com/services/..." } }
-> ```
->
-> Aynı dosyayı kendi bağlantı dizen gibi başka yerel ayarlar için de
-> kullanabilirsin. Sunucuya kurarken ortam değişkeni de olur:
-> `Monitor__SlackWebhookUrl=...`
+> Webhook'u eline geçiren herkes kanalına mesaj atabilir; bu yüzden
+> `appsettings.json`'a yazma - o dosya depoya giriyor. Sunucuya
+> kurarken ortam değişkeni de olur: `Monitor__SlackWebhookUrl=...`
+> (veritabanındaki değer bunu ezer).
 
 Webhook tek ve geneldir; **hangi sunucunun** bildirim göndereceği ise
 sunucu başına seçilir: "Sunucuları yönet" formundaki **"Critical
 durumları Slack'e bildir"** kutucuğu. Varsayılan kapalı - yeni eklenen
 bir sunucu kendiliğinden bildirim göndermeye başlamaz.
-
 Ne zaman mesaj gider:
 
 - Bir sağlık kontrolü **Critical**'e düştüğünde (kırmızı) ve
@@ -291,6 +283,7 @@ edilemez; panel boş kalır, sunucu rahat kalır.
 | `GET /api/live/errorlog?instance=X` | Hata günlüğü (varsayılan kapalı) |
 | `GET /api/health` | Uygulamanın kendi sağlığı, toplayıcı yaşıyor mu |
 | `GET/POST/PUT/DELETE /api/settings/instances` | Sunucu listesi yönetimi |
+| `GET/POST /api/settings/slack`, `POST /api/settings/slack/test` | Slack webhook adresi (veritabanında saklanır, geri okunmaz) |
 | `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/logout` | `RequiresLogin` sunucular için giriş |
 
 ---

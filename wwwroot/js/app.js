@@ -526,6 +526,93 @@ function openInstanceManager() {
     closeInstanceForm();
     $('instMgr').hidden = false;
     loadInstanceManagerList();
+    loadSlackSetting();
+}
+
+// ------------------------------------------------------------------
+// Slack webhook ayarı
+//
+// Adres BİR DAHA ekrana okunmaz - sunucu yalnızca "kayıtlı mı" der
+// (bkz. Api/InstanceManagementEndpoints.cs /slack). Aynı disiplin
+// sunucu şifrelerinde de var: bir kez girilir, gösterilmez.
+// ------------------------------------------------------------------
+
+function setSlackError(message) {
+    const box = $('slackError');
+    box.hidden = !message;
+    box.textContent = message || '';
+}
+
+async function loadSlackSetting() {
+    setSlackError('');
+    const note = $('slackState');
+
+    try {
+        const s = await getJson('/api/settings/slack');
+
+        if (!s.storable) {
+            note.className = 'instmgr-slack-note is-off';
+            note.textContent =
+                'İzleme veritabanına ulaşılamadığı için webhook kaydedilemiyor.';
+            return;
+        }
+
+        if (s.configured) {
+            note.className = 'instmgr-slack-note is-on';
+            note.textContent = s.fromDatabase
+                ? 'Webhook kayıtlı — bildirimler gönderilebilir.'
+                : 'Webhook appsettings.json/ortam değişkeninden geliyor. Buraya kaydedersen dosyadan silebilirsin.';
+        } else {
+            note.className = 'instmgr-slack-note is-off';
+            note.textContent = 'Webhook tanımlı değil — Slack bildirimi kapalı.';
+        }
+    } catch (err) {
+        note.className = 'instmgr-slack-note is-off';
+        note.textContent = 'Durum okunamadı: ' + err.message;
+    }
+}
+
+async function saveSlackSetting(url) {
+    setSlackError('');
+    try {
+        const res = await fetch('/api/settings/slack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ webhookUrl: url })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setSlackError(data.error || ('HTTP ' + res.status)); return false; }
+
+        $('slackWebhook').value = '';
+        await loadSlackSetting();
+        return true;
+    } catch (err) {
+        setSlackError('Kaydedilemedi: ' + err.message);
+        return false;
+    }
+}
+
+async function testSlackSetting() {
+    setSlackError('');
+    const btn = $('slackTest');
+    btn.disabled = true;
+    btn.textContent = 'Gönderiliyor…';
+
+    try {
+        const res = await fetch('/api/settings/slack/test', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+            $('slackState').className = 'instmgr-slack-note is-on';
+            $('slackState').textContent = 'Test mesajı gönderildi — Slack kanalını kontrol et.';
+        } else {
+            setSlackError(data.error || ('Gönderilemedi: HTTP ' + res.status));
+        }
+    } catch (err) {
+        setSlackError('Gönderilemedi: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test mesajı gönder';
+    }
 }
 
 function closeInstanceManager() {
@@ -549,7 +636,12 @@ function openInstanceForm(item) {
     $('imKey').disabled = !!item;   // anahtar oluşturulduktan sonra değiştirilemez, bkz. InstanceManagementEndpoints üstündeki not
     $('imDisplayName').value = (item && item.displayName) || '';
     $('imServer').value = (item && item.server) || '';
-    $('imDatabase').value = (item && item.databaseName) || '';
+    // Veritabanı alanı formdan KALDIRILDI: bağlantı yalnızca "bir yere
+    // bağlanmak" için açılıyor, okunan her şey sunucu geneli DMV -
+    // master dışında bir şey seçmenin pratikte faydası yoktu, sorusu
+    // ise her yeni sunucuda tekrar tekrar karşımıza çıkıyordu.
+    // Sunucu tarafı boş gelen değeri zaten "master" yapıyor
+    // (bkz. Api/InstanceManagementEndpoints.cs).
     $('imRequiresLogin').checked = !!(item && item.requiresLogin);
     $('imUserId').value = (item && item.userId) || '';
     $('imPassword').value = '';
@@ -647,7 +739,7 @@ async function handleInstanceFormSubmit(e) {
     const body = {
         displayName: $('imDisplayName').value.trim(),
         server: $('imServer').value.trim(),
-        databaseName: $('imDatabase').value.trim(),
+        databaseName: '',            // sunucu tarafı "master" yapıyor
         userId: $('imUserId').value.trim(),
         password: $('imPassword').value,
         requiresLogin: $('imRequiresLogin').checked,
@@ -2415,6 +2507,19 @@ function wireEvents() {
     $('authClose').addEventListener('click', handleAuthCancel);
 
     $('manageInstances').addEventListener('click', openInstanceManager);
+
+    $('slackSave').addEventListener('click', async () => {
+        const url = $('slackWebhook').value.trim();
+        if (!url) { setSlackError('Webhook adresini yapıştır.'); return; }
+        await saveSlackSetting(url);
+    });
+
+    $('slackTest').addEventListener('click', testSlackSetting);
+
+    $('slackClear').addEventListener('click', async () => {
+        if (!window.confirm('Slack webhook adresi silinsin mi?\n\nBildirimler duracak.')) return;
+        await saveSlackSetting('');
+    });
     $('instMgrClose').addEventListener('click', closeInstanceManager);
     $('instMgrAddNew').addEventListener('click', () => openInstanceForm(null));
     $('imCancel').addEventListener('click', closeInstanceForm);

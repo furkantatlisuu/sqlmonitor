@@ -25,14 +25,38 @@ public sealed class SlackNotifier
 {
     private readonly HttpClient _http;
     private readonly MonitorOptions _options;
+    private readonly AppSettingStore _settings;
     private readonly ILogger<SlackNotifier> _log;
 
-    public SlackNotifier(HttpClient http, IOptions<MonitorOptions> options, ILogger<SlackNotifier> log)
+    public SlackNotifier(
+        HttpClient http, IOptions<MonitorOptions> options,
+        AppSettingStore settings, ILogger<SlackNotifier> log)
     {
         _http = http;
         _options = options.Value;
+        _settings = settings;
         _log = log;
     }
+
+    /// <summary>
+    /// Webhook adresi ÖNCE ekrandan girilip veritabanına kaydedilmiş
+    /// olandan okunur; yoksa appsettings.json/ortam değişkenine düşülür.
+    ///
+    /// Bu sıra bilinçli: ekrandan girilen değer hiçbir dosyada görünmez
+    /// (depoya ve paylaşılan zip'e sızmaz), dosya yolu ise sunucuya
+    /// kurulumlarda ortam değişkeniyle vermek isteyenler için duruyor.
+    /// </summary>
+    private string? WebhookUrl
+    {
+        get
+        {
+            var fromDb = _settings.Get(AppSettingStore.SlackWebhookUrl);
+            return !string.IsNullOrWhiteSpace(fromDb) ? fromDb : _options.SlackWebhookUrl;
+        }
+    }
+
+    /// <summary>Arayüzün "Slack yapılandırılmış mı" sorusuna cevabı.</summary>
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(WebhookUrl);
 
     // Kırmızı/yeşil - Slack'in kendi renk paletiyle uyumlu (Slack'in resmi
     // marka renkleri #E01E5A/#2EB67D değil, klasik alarm kırmızısı/yeşili
@@ -44,7 +68,8 @@ public sealed class SlackNotifier
     public async Task NotifyTransitionAsync(
         InstanceOptions instance, HealthCheck check, Severity previous, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_options.SlackWebhookUrl)) return;
+        var webhook = WebhookUrl;
+        if (string.IsNullOrWhiteSpace(webhook)) return;
 
         var becameCritical = check.Severity == Severity.Critical;
         var displayName = instance.DisplayName ?? instance.Name;
@@ -88,7 +113,7 @@ public sealed class SlackNotifier
 
         try
         {
-            var res = await _http.PostAsJsonAsync(_options.SlackWebhookUrl, payload, ct);
+            var res = await _http.PostAsJsonAsync(webhook, payload, ct);
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct);
@@ -100,6 +125,46 @@ public sealed class SlackNotifier
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Slack bildirimi gönderilemedi ({Instance}/{Key})", instance.Name, check.Key);
+        }
+    }
+
+    /// <summary>
+    /// Ayar ekranındaki "Test mesajı gönder" düğmesi. Normal bildirimlerin
+    /// aksine hatayı YUTMAZ - kullanıcı adresi yeni girdi, çalışmadıysa
+    /// sebebini görmesi gerekiyor.
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> SendTestAsync(CancellationToken ct)
+    {
+        var webhook = WebhookUrl;
+        if (string.IsNullOrWhiteSpace(webhook)) return (false, "Webhook adresi tanımlı değil.");
+
+        var payload = new
+        {
+            attachments = new object[]
+            {
+                new
+                {
+                    color = ResolvedColor,
+                    title = ":white_check_mark: SQL İzleme — test mesajı",
+                    text = "Slack bağlantısı çalışıyor. Bu mesaj ayar ekranındaki " +
+                           "\"Test mesajı gönder\" düğmesiyle gönderildi.",
+                    footer = "SqlMonitor",
+                    ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                }
+            }
+        };
+
+        try
+        {
+            var res = await _http.PostAsJsonAsync(webhook, payload, ct);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            var body = (await res.Content.ReadAsStringAsync(ct)).Trim();
+            return (false, $"Slack reddetti: {(int)res.StatusCode} {body}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 

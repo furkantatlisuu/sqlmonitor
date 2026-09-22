@@ -86,6 +86,17 @@ public sealed class BackupHistoryReader
             return result;
         }
 
+        // Yerel sunucunun adı - elle verilen adres listesinde kendisi de
+        // varsa atlayabilmek için (aşağıya bak).
+        string? localServerName = null;
+        try
+        {
+            localServerName = await localConn.ExecuteScalarAsync<string>(new CommandDefinition(
+                "SELECT CONVERT(nvarchar(128), SERVERPROPERTY('ServerName'));",
+                commandTimeout: _options.QueryTimeoutSeconds, cancellationToken: ct));
+        }
+        catch { /* okunamazsa yalnızca "kendini atlama" özelliği çalışmaz */ }
+
         foreach (var source in sources)
         {
             ct.ThrowIfCancellationRequested();
@@ -98,6 +109,26 @@ public sealed class BackupHistoryReader
             {
                 await using var conn = _factory.CreateBackupSourceConnection(instance, source);
                 await conn.OpenAsync(ct);
+
+                // Bağlandığımız makinenin KENDİ adını soruyoruz. Kullanıcı
+                // yalnızca IP yazdıysa etiket "10.0.0.17" olarak kalırdı;
+                // bulguda "yedek 10.0.0.17 üzerinde bulundu" yerine
+                // "TestSQL3 üzerinde bulundu" demek çok daha anlaşılır.
+                var remoteName = await conn.ExecuteScalarAsync<string>(new CommandDefinition(
+                    "SELECT CONVERT(nvarchar(128), SERVERPROPERTY('ServerName'));",
+                    commandTimeout: _options.QueryTimeoutSeconds, cancellationToken: ct));
+
+                if (!string.IsNullOrWhiteSpace(remoteName))
+                {
+                    // Elle verilen adreslerin arasında yerel sunucunun kendisi
+                    // de olabilir (kullanıcı üç düğümün IP'sini birden
+                    // yapıştırırsa). Onu atlıyoruz: yerel yedek geçmişi zaten
+                    // ana sorgudan geliyor, ikinci kez okumak boşuna yük.
+                    if (string.Equals(remoteName, localServerName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    label = remoteName;
+                }
 
                 var rows = await conn.QueryAsync<HistoryRow>(new CommandDefinition(
                     DmvSql.BackupHistory,
@@ -134,6 +165,28 @@ public sealed class BackupHistoryReader
     {
         if (!instance.AutoDiscoverAgReplicas)
             return new List<BackupSourceOptions>();
+
+        // Kullanıcı replika adreslerini ELLE verdiyse keşfe hiç gitmiyoruz.
+        //
+        // Sebebi canlıda ölçüldü: bu ağda ne replikaların kısa adı
+        // (TestSQL2) ne de SQL Server'ın bildiği tam alan adı
+        // (TestSQL2.nilveratest.com) DNS'ten çözülüyor. Adresleri elle
+        // veren bir kullanıcıya rağmen keşfedilen ADLARLA bağlanmayı
+        // denemek yalnızca gecikme ve "okunamadı" hatası üretirdi.
+        //
+        // Hangi adresin hangi sunucu olduğunu bilmemize gerek yok:
+        // bağlanınca sunucu kendi adını söylüyor (bkz. ReadUncachedAsync).
+        if (instance.ReplicaAddresses.Count > 0)
+        {
+            return instance.ReplicaAddresses
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(address => new BackupSourceOptions
+                {
+                    Name = address,          // geçici etiket; gerçek ad bağlanınca okunuyor
+                    ConnectionString = _factory.RebindServer(instance, address)
+                })
+                .ToList();
+        }
 
         var replicas = (await localConn.QueryAsync<ReplicaRow>(new CommandDefinition(
             DmvSql.AgReplicas, cancellationToken: ct))).ToList();

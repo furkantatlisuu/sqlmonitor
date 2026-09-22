@@ -502,6 +502,10 @@ public sealed class AgReplicaInfo
     public string AvailabilityMode { get; set; } = "";
     public string FailoverMode { get; set; } = "";
     public int BackupPriority { get; set; }
+
+    /// <summary>"TCP://SUNUCU.alanadi.com:5022" - kısa ad DNS'te çözülmediğinde ikinci aday adres.</summary>
+    public string? EndpointUrl { get; set; }
+
     public bool IsLocal { get; set; }
     public string? LastConnectErrorDescription { get; set; }
     public DateTime? LastConnectErrorTime { get; set; }

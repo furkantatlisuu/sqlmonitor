@@ -612,6 +612,11 @@ public static class DmvSql
             AvailabilityMode      = ar.availability_mode_desc,
             FailoverMode          = ar.failover_mode_desc,
             BackupPriority        = ar.backup_priority,
+            -- Mirroring uç noktası: "TCP://SUNUCU.alanadi.com:5022" gibi.
+            -- Replikanın KAYITLI kısa adı (replica_server_name) bazı ağlarda
+            -- DNS'ten çözülmüyor ama buradaki tam alan adı (FQDN) çözülebilir -
+            -- otomatik keşif için ikinci bir aday adres, bkz. BackupHistoryReader.
+            EndpointUrl           = ar.endpoint_url,
             IsLocal               = CONVERT(bit, ISNULL(ars.is_local, 0)),
             LastConnectErrorDescription = ars.last_connect_error_description,
             LastConnectErrorTime  = ars.last_connect_error_timestamp

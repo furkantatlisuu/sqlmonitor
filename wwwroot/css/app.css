@@ -1176,6 +1176,17 @@ tr.is-muted { opacity: .55; }
 
 #imCredFields[hidden] { display: none; }
 
+/* Slack ayarı - sunucu listesinden ayrı bir blok olduğu belli olsun. */
+.instmgr-slack {
+    margin-top: 18px; padding-top: 16px;
+    border-top: 1px solid var(--rule);
+}
+.instmgr-slack h3 { margin: 0 0 6px; font-size: 13px; }
+.instmgr-slack-note { font-size: 11.5px; color: var(--ink-muted); line-height: 1.5; margin: 6px 0; }
+.instmgr-slack-note.is-on  { color: var(--healthy); }
+.instmgr-slack-note.is-off { color: var(--ink-faint); }
+.instmgr-slack-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
 .instmgr-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 .instmgr-form-actions .btn-index { padding: 8px 16px; }
 

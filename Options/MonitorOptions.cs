@@ -116,6 +116,21 @@ public sealed class InstanceOptions
     /// </summary>
     public Dictionary<string, string> ReplicaHostOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Diğer AG replikalarının DOĞRUDAN adresleri ("10.0.0.16" gibi),
+    /// ad eşlemesi olmadan.
+    ///
+    /// ReplicaHostOverrides'ın basit hâli: kullanıcı hangi adın hangi IP
+    /// olduğunu bilmek/yazmak zorunda kalmasın diye yalnızca adresleri
+    /// yazar; hangi sunucuya bağlandığımızı bağlanınca @@SERVERNAME ile
+    /// zaten öğreniyoruz (bkz. BackupHistoryReader).
+    ///
+    /// Doluysa yedek geçmişi için otomatik ad keşfinin YERİNE geçer -
+    /// çünkü adların çözülemediği bir ağda keşfedilen adlarla bağlanmayı
+    /// denemek yalnızca hata üretir.
+    /// </summary>
+    public List<string> ReplicaAddresses { get; set; } = new();
+
     /// <summary>Bu instance'ın Critical geçişleri Slack'e gitsin mi - bkz. CollectorService/SlackNotifier.</summary>
     public bool SlackAlertsEnabled { get; set; }
 }

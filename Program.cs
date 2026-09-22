@@ -158,6 +158,10 @@ builder.Services.AddSingleton<AgentJobService>();
 builder.Services.AddSingleton<IdentityColumnScanner>();
 builder.Services.AddSingleton<AgentJobHealthCache>();
 builder.Services.AddSingleton<AlwaysOnHealthCache>();
+
+// Ekrandan girilen, dosyada tutulmayan ayarlar (Slack webhook'u) -
+// SlackNotifier buna bağımlı, ondan ÖNCE kurulmalı.
+builder.Services.AddSingleton<AppSettingStore>();
 builder.Services.AddSingleton<SlackDebouncer>();
 
 // SlackNotifier kendi HttpClient'ını AddHttpClient'tan alıyor - webhook
@@ -211,6 +215,10 @@ else
 // bu adım hiçbir şey okuyamaz.
 var registry = app.Services.GetRequiredService<InstanceRegistry>();
 await registry.InitializeAsync(default);
+
+// Ekrandan girilmiş ayarları (Slack webhook'u) belleğe al - bildirim
+// gönderilirken her seferinde veritabanına gidilmesin.
+await app.Services.GetRequiredService<AppSettingStore>().LoadAsync(default);
 
 // Önceden başarıyla girilmiş RequiresLogin kimlik bilgilerini
 // (mon.RememberedCredential) belleğe önceden yükler - kullanıcı her

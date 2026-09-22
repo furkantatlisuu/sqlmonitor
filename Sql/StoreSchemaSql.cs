@@ -199,6 +199,26 @@ public static class StoreSchemaSql
         );
         GO
 
+        -- Ekrandan girilen, dosyada TUTULMAYAN uygulama ayarları.
+        --
+        -- Şu an tek kullanıcısı Slack webhook adresi. appsettings.json'da
+        -- durmasının iki sakıncası vardı: dosya hem depoya hem paylaşılan
+        -- zip'e giriyor (webhook'u eline geçiren herkes kanala mesaj
+        -- atabilir), hem de yayın çıktısını her aldığımızda yeniden
+        -- yazılması gerekiyordu. Burada durduğunda hiçbir dosyada
+        -- görünmüyor, yedeklenen tek yer izleme veritabanı oluyor.
+        --
+        -- Yalnızca Services.AppSettingStore okur/yazar.
+        IF OBJECT_ID(N'mon.AppSetting') IS NULL
+        CREATE TABLE mon.AppSetting
+        (
+            Name      NVARCHAR(100) NOT NULL,
+            Value     NVARCHAR(1000) NULL,
+            UpdatedAt DATETIME2(0)  NOT NULL CONSTRAINT DF_AppSetting_UpdatedAt DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT PK_AppSetting PRIMARY KEY CLUSTERED (Name)
+        );
+        GO
+
         CREATE OR ALTER PROCEDURE mon.usp_EnsureInstance
             @Name        NVARCHAR(128),
             @DisplayName NVARCHAR(200) = NULL,

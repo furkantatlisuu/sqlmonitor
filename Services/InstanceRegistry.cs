@@ -168,6 +168,8 @@ public sealed class InstanceRegistry
 
     private static InstanceOptions ToInstanceOptions(InstanceRecord r)
     {
+        var replicaHosts = ParseReplicaHosts(r.ReplicaHostOverrides);
+
         var builder = new SqlConnectionStringBuilder
         {
             DataSource = r.Server,
@@ -206,34 +208,55 @@ public sealed class InstanceRegistry
             IsDefault = r.IsDefault,
             RequiresLogin = r.RequiresLogin,
             AutoDiscoverAgReplicas = r.AutoDiscoverAgReplicas,
-            ReplicaHostOverrides = ParseReplicaHostOverrides(r.ReplicaHostOverrides),
+            ReplicaHostOverrides = replicaHosts.Map,
+            ReplicaAddresses = replicaHosts.Addresses,
             SlackAlertsEnabled = r.SlackAlertsEnabled
         };
     }
 
     /// <summary>
-    /// "SQLNODE2=10.0.0.16;SQLNODE3=10.0.0.17" -> { "SQLNODE2": "10.0.0.16", ... }.
+    /// Replika adres alanını ayrıştırır. İKİ biçim de kabul edilir:
+    ///
+    ///   "10.0.0.16;10.0.0.17"                    -> düz adres listesi (basit yol)
+    ///   "SQLNODE2=10.0.0.16;SQLNODE3=10.0.0.17"  -> ad -> adres eşlemesi
+    ///
+    /// Düz liste kullanıcı için çok daha kolay: hangi adın hangi makine
+    /// olduğunu bilmek zorunda değil, çünkü bağlandığımızda sunucu zaten
+    /// kendi adını söylüyor. Ad eşlemesi biçimi, daha önce böyle
+    /// kaydetmiş kurulumlar bozulmasın diye korunuyor.
+    ///
     /// Bozuk/boş parçalar sessizce atlanır - tek bir yazım hatası tüm
-    /// eşlemeyi geçersiz kılmamalı, yalnızca o parça yoksayılır.
+    /// listeyi geçersiz kılmamalı.
     /// </summary>
-    private static Dictionary<string, string> ParseReplicaHostOverrides(string? raw)
+    private static (Dictionary<string, string> Map, List<string> Addresses) ParseReplicaHosts(string? raw)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(raw)) return result;
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var addresses = new List<string>();
 
-        foreach (var pair in raw.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        if (string.IsNullOrWhiteSpace(raw)) return (map, addresses);
+
+        foreach (var piece in raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            var parts = pair.Split('=', 2);
-            if (parts.Length != 2) continue;
+            var entry = piece.Trim();
+            if (entry.Length == 0) continue;
 
-            var host = parts[0].Trim();
-            var address = parts[1].Trim();
-            if (host.Length == 0 || address.Length == 0) continue;
+            if (entry.Contains('='))
+            {
+                var parts = entry.Split('=', 2);
+                var host = parts[0].Trim();
+                var address = parts[1].Trim();
+                if (host.Length == 0 || address.Length == 0) continue;
 
-            result[host] = address;
+                map[host] = address;
+                addresses.Add(address);          // eşlemedeki adres de doğrudan kullanılabilir
+            }
+            else
+            {
+                addresses.Add(entry);
+            }
         }
 
-        return result;
+        return (map, addresses);
     }
 
     /// <summary>
