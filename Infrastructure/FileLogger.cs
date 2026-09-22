@@ -30,11 +30,20 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private const int RetentionDays = 14;
 
     /// <summary>
-    /// BOM YAZMAYAN UTF-8. StreamWriter'ın varsayılanı BOM yazar; dosyanın
-    /// başında görünen "" karakteri hem gereksiz hem de grep/Select-String
-    /// ile arayan birinin ilk satırı kaçırmasına yol açar.
+    /// BOM'LU UTF-8 - bilerek.
+    ///
+    /// Bir ara BOM'suza çevrilmişti (dosyanın başındaki görünmez karakter
+    /// gereksiz duruyordu) ama canlıda görüldü ki Windows'un günlük okuma
+    /// araçları BOM'a bakıyor: BOM yokken Windows PowerShell'in
+    /// Get-Content'i ve Not Defteri dosyayı sistem kod sayfasıyla okuyup
+    /// Türkçe karakterleri bozuyor ("BİLGİ" -> "BÄ°LGÄ°"). Bu günlüğü
+    /// okuyacak kişi tam da o araçları kullanacağı için BOM burada
+    /// zarar değil, fayda.
+    ///
+    /// StreamWriter BOM'u yalnızca dosya boşken (konum 0) yazar; her
+    /// eklemede tekrarlanmaz.
     /// </summary>
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly UTF8Encoding Utf8WithBom = new(encoderShouldEmitUTF8Identifier: true);
 
     /// <summary>
     /// Temizliğin en son hangi gün yapıldığı. Yalnızca açılışta temizlemek
@@ -91,7 +100,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
                 using var stream = new FileStream(
                     path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-                using var writer = new StreamWriter(stream, Utf8NoBom);
+                using var writer = new StreamWriter(stream, Utf8WithBom);
                 writer.WriteLine(line);
             }
         }
