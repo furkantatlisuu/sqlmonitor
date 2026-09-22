@@ -6,6 +6,47 @@ using SqlMonitor.Infrastructure;
 using SqlMonitor.Options;
 using SqlMonitor.Services;
 
+// ---------------------------------------------------------------------
+// TEK KOPYA KORUMASI
+//
+// Çift tıklanan bir uygulamada en sık yapılan hata, zaten açıkken bir kez
+// daha çift tıklamaktır. Konsol olmadığı için ikinci kopya kullanıcıya
+// hiçbir şey söylemeden ölürdü; üstelik ölmeseydi DAHA kötü olurdu -
+// iki toplayıcı aynı izleme veritabanına yazardı.
+//
+// Doğru davranış: "zaten açık" bir hata değil. Çalışan kopyayı tarayıcıda
+// aç ve sessizce çık. Kullanıcı açısından ikinci çift tıklama da
+// "uygulamayı aç" demektir, sonuç aynı olmalı.
+//
+// Mutex adı dinlenen adresi içeriyor: farklı portlara ayarlanmış iki
+// kurulum (örn. test) birbirini engellemesin.
+// ---------------------------------------------------------------------
+var startupConfig = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddJsonFile("appsettings.Local.json", optional: true)
+    .AddEnvironmentVariables()
+    .Build();
+
+var configuredUrl = startupConfig["Urls"] ?? "http://localhost:5000";
+var mutexName = "Local\\SqlMonitor_" +
+    string.Concat(configuredUrl.Where(char.IsLetterOrDigit));
+
+using var singleInstance = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
+
+if (!isFirstInstance)
+{
+    // Zaten çalışan kopyayı göster. Tarayıcı açılamazsa bile sessizce
+    // çıkıyoruz - ikinci bir kopya başlatmak her hâlükârda yanlış olurdu.
+    try
+    {
+        Process.Start(new ProcessStartInfo(configuredUrl) { UseShellExecute = true });
+    }
+    catch { /* tarayıcı açılamadı, yapacak bir şey yok */ }
+
+    return 0;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Bağlantı dizeleri appsettings.json'da düz metin duruyor. Geliştirme
@@ -20,6 +61,24 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 builder.Configuration.AddEnvironmentVariables();
+
+// Günlük sağlayıcıları BİLEREK sıfırdan kuruluyor.
+//
+// Varsayılanlar arasında Windows Event Log da var ve canlıda şu hatayı
+// verdiği görüldü: açılış başarısız olduğunda (örn. port meşgul) hata
+// yazılmaya çalışılırken "Cannot access a disposed object: EventLogInternal"
+// fırlatıyor, bu da aşağıdaki try/catch'e HİÇ SIRA GELMEDEN süreci
+// öldürüyordu - yani asıl hatayı gösterecek mekanizma, hatanın kendisi
+// yüzünden çalışamıyordu. Event Log zaten bu uygulama için gereksiz
+// (kaynak oluşturmak yönetici yetkisi ister).
+//
+// Geriye ihtiyacımız olan ikisi kalıyor: Console (pencereli çalışırken
+// hiçbir yere yazmaz, zararsız) ve exe'nin yanındaki logs/ klasörüne
+// yazan kendi dosya günlüğümüz - konsol olmayınca tek teşhis kaynağı o.
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddProvider(new FileLoggerProvider(
+    Path.Combine(AppContext.BaseDirectory, "logs")));
 
 builder.Services.Configure<MonitorOptions>(
     builder.Configuration.GetSection(MonitorOptions.SectionName));
@@ -172,4 +231,19 @@ if (Environment.UserInteractive && !args.Contains("--no-browser"))
     });
 }
 
-app.Run();
+// Konsol olmadığı için başarısız bir açılış EKRANDA HİÇBİR İZ BIRAKMAZ -
+// kullanıcı çift tıklar, hiçbir şey olmaz. En sık sebep portun meşgul
+// olmasıdır (uygulama zaten açık ya da Visual Studio çalışıyor). Hatayı
+// hem günlüğe yazıp hem pencerede gösteriyoruz.
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    logger.LogCritical(ex, "Uygulama başlatılamadı.");
+    StartupFailureDialog.Show(ex, Path.Combine(AppContext.BaseDirectory, "logs"));
+    return 1;
+}
+
+return 0;

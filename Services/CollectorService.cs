@@ -48,6 +48,28 @@ public sealed class CollectorService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await CollectLoopAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // NORMAL KAPANIŞ - hata değil.
+            //
+            // Kapanış sinyali geldiğinde Task.Delay ve
+            // PeriodicTimer.WaitForNextTickAsync iptal istisnası fırlatır.
+            // Yakalanmazsa .NET bunu "BackgroundService failed" diye ERROR,
+            // ardından "IHost instance is stopping" diye KRİTİK olarak
+            // günlüğe yazıyor - uygulamayı her kapattığında günlükte iki
+            // korkutucu satır. Günlük dosyaya yazılmaya başlandıktan sonra
+            // bu gürültü doğrudan kullanıcının karşısına çıkıyor, o yüzden
+            // kaynağında susturuluyor.
+            _log.LogInformation("Toplayıcı durduruldu.");
+        }
+    }
+
+    private async Task CollectLoopAsync(CancellationToken stoppingToken)
+    {
         // Uygulama daha ayağa kalkarken izlenen sunucuya yüklenmeyelim.
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 

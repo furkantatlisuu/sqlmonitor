@@ -6,6 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SqlMonitor</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!--
+      Pencereli uygulama: çift tıklanınca ARKA PLANDA açılır, konsol
+      penceresi görünmez (kullanıcı isteği). Bunun bedeli, konsola yazılan
+      her şeyin kaybolmasıdır - o yüzden günlük dosyaya yazılıyor
+      (Infrastructure/FileLogger.cs) ve açılış hataları pencerede
+      gösteriliyor (Infrastructure/StartupFailureDialog.cs). İkisi
+      olmadan WinExe'ye geçmek, hataları sessizce yutmak demek olurdu.
+
+      Durdurmak için: Görev Yöneticisi > SqlMonitor.exe. Sürekli açık
+      kalması gerekiyorsa Windows Service olarak kurmak daha doğru.
+    -->
+    <OutputType>WinExe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>

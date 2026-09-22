@@ -155,12 +155,23 @@ exe'nin içinde.
 
 - Çift tıklayınca açılır, `http://localhost:51900` adresini dinler ve
   **tarayıcıyı kendisi açar**. İstemezsen `SqlMonitor.exe --no-browser`.
+- **Konsol penceresi yoktur** (pencereli uygulama). Bunun bedeli, hata
+  mesajlarının ekrana yazılamamasıdır; onun yerine:
+  - Her şey **exe'nin yanındaki `logs/` klasörüne** günlük bir dosyaya
+    yazılır (14 günden eskiler kendiliğinden silinir). Bir sorun varsa
+    bakılacak ilk yer orasıdır.
+  - Açılış başarısız olursa (örn. port başka bir uygulamada) sebebini
+    anlatan bir **uyarı penceresi** çıkar - sessizce kapanmaz.
+- **Zaten açıkken tekrar çift tıklarsan** ikinci kopya açılmaz: çalışan
+  kopya tarayıcıda gösterilir ve yeni süreç sessizce çıkar. (İki toplayıcının
+  aynı veritabanına yazması engellenmiş olur.)
+- Durdurmak için: **Görev Yöneticisi > SqlMonitor.exe > Görevi sonlandır.**
 - Adres `appsettings.json` içindeki `Urls` ayarından gelir. Visual
   Studio'dan F5 ile çalıştırırken bunun yerine
   `Properties/launchSettings.json` geçerli olur; ikisi bilerek aynı portta.
   **İkisini aynı anda çalıştırma** - ikincisi "port kullanımda" der.
-- Açılan konsol penceresi kapatılırsa uygulama durur. Sürekli açık
-  kalması gerekiyorsa (bildirimler ve geçmiş için gerekir) Windows
+- Uygulama oturum boyunca çalışır; bilgisayar kapanınca durur. Sürekli
+  açık kalması gerekiyorsa (bildirimler ve geçmiş için gerekir) Windows
   Service olarak kurmak daha doğru.
 - `appsettings.Local.json` **yayın çıktısına kopyalanmaz** (içinde yerel
   sır olabilir, bkz. yukarısı). EXE'de de Slack bildirimi istiyorsan o
