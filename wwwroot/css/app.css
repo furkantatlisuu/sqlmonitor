@@ -1217,3 +1217,12 @@ tr.is-muted { opacity: .55; }
     color: var(--critical);
     font-size: 12px; font-weight: 500;
 }
+
+/* "İzlenecek sunucu yok" durumu - bir HATA değil, yapılacak bir iş.
+   Kırmızı yerine nötr/uyarı tonu: kullanıcı bir şeyi bozmadı, sadece
+   henüz sunucu eklemedi (ya da sonuncusunu sildi). */
+.errors.is-notice {
+    background: var(--warn-soft);
+    border-color: var(--warn);
+    color: var(--warn);
+}

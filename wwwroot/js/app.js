@@ -581,6 +581,8 @@ function closeInstanceForm() {
  * Şu an açık olan sekme neyse onu da tazeliyoruz.
  */
 function reloadActiveTab() {
+    if (!state.instance) return;              // sunucu yok - hiçbir sekme veri çekmesin
+
     const activeTab = document.querySelector('.tab.is-active');
     if (!activeTab) return;
 
@@ -620,10 +622,19 @@ async function afterInstanceListChanged() {
     state.waitTrendLoaded = false;
     state.lastTimelineAt = 0;
 
+    // Son sunucu da silinmiş olabilir - o zaman döngüyü durdurup
+    // ekranı "sunucu ekle" durumuna alıyoruz, boşa istek atmıyoruz.
+    if (!state.instance) {
+        enterNoInstanceState();
+        return;
+    }
+
     const ok = await ensureAuthorized();
     if (ok) {
         refresh();
         reloadActiveTab();
+        // Yeni sunucu eklendiyse döngü durmuş olabilir; yeniden kur.
+        restartTimer();
     }
 }
 
@@ -717,7 +728,35 @@ async function handleInstanceDelete(key) {
     }
 }
 
+/**
+ * Tanımlı hiç sunucu kalmadıysa (hepsi silindiyse ya da ilk açılış)
+ * ekranı "yapılacak iş" durumuna alır ve DÖNGÜYÜ DURDURUR.
+ *
+ * BUG (bulundu/düzeltildi): eskiden yalnızca state.instance null'a
+ * düşüyordu ama zamanlayıcı çalışmaya devam ediyordu; refresh() her
+ * turda "?instance=" ile istek atıp 404 alıyor, ekranda da silinmiş
+ * sunucunun BAYAT verisi duruyordu. Saniyede bir boşa giden istek,
+ * üstelik kullanıcıya "hâlâ bir şey izleniyor" hissi veren yanlış bir
+ * ekran - ikisi de kabul edilemez.
+ */
+function enterNoInstanceState() {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; }
+
+    state.lastSnapshot = null;
+
+    const box = $('errors');
+    box.hidden = false;
+    box.classList.add('is-notice');
+    box.textContent =
+        'İzlenecek sunucu tanımlı değil — sağ üstteki "⚙ Sunucular" ekranından ekleyebilirsin.';
+
+    $('lastUpdate').textContent = 'duraklatıldı';
+}
+
 async function refresh() {
+    // Sunucu yoksa sunucuya sormanın anlamı yok.
+    if (!state.instance) { enterNoInstanceState(); return; }
+
     // Yavaş bir sunucuda istekler üst üste binmesin.
     if (state.inFlight) return;
     state.inFlight = true;
@@ -776,6 +815,7 @@ function blip() {
 
 function showErrors(errors) {
     const box = $('errors');
+    box.classList.remove('is-notice');   // "sunucu yok" bildirimi varsa kalksın
     if (!errors || errors.length === 0) {
         box.hidden = true;
         return;
@@ -1343,6 +1383,7 @@ function renderWaits(w) {
  * "yenile" düğmesi yok: geçmiş veri saniyeler içinde anlamlı değişmez.
  */
 async function loadWaitTrend(opts = {}) {
+    if (!state.instance) return;              // sunucu yok - sormanın anlamı yok
     if (state.waitTrendInFlight) return;
     if (!opts.force && state.waitTrendLoaded) return;
 
@@ -2287,6 +2328,12 @@ function closeDrawer() { $('drawer').hidden = true; }
 
 function restartTimer() {
     if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+
+    // Sunucu yoksa zamanlayıcıyı hiç kurmuyoruz - yoksa saniyede bir
+    // 404 alan bir döngü başlatmış oluruz (bkz. enterNoInstanceState).
+    if (!state.instance) return;
+
     if (state.intervalSeconds > 0) {
         state.timer = setInterval(refresh, state.intervalSeconds * 1000);
     }
