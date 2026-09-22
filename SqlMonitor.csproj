@@ -13,4 +13,23 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
   </ItemGroup>
 
+  <!--
+    appsettings.Local.json YEREL sırlar içindir (Slack webhook'u gibi) ve
+    .gitignore'dadır. Publish çıktısına DA girmemeli: yayınlanan klasör
+    çoğu zaman birine gönderilir/zip'lenir, sır oraya sızmamalı.
+    Geliştirirken yine okunuyor (dosya proje kökünde durduğu sürece);
+    yalnızca "yayınlanan pakete kopyalama" davranışı kapatıldı.
+    EXE'de de Slack isteniyorsa dosya exe'nin yanına ELLE konur.
+  -->
+  <ItemGroup>
+    <Content Update="appsettings.Local.json" CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- Dağıtılan pakette hata ayıklama sembollerine (.pdb) gerek yok. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
 </Project>

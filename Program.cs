@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SqlMonitor.Api;
@@ -136,5 +137,39 @@ if (registry.Instances.Count == 0)
 
 foreach (var instance in registry.Instances)
     logger.LogInformation("İzlenen instance: {Name}", instance.Name);
+
+// EXE olarak çift tıklanınca tarayıcıyı kendimiz açıyoruz - "çalıştır,
+// sonra adresi elle yaz" adımı kullanıcıya bırakılmasın.
+//
+// İki durumda AÇMIYORUZ:
+//   --no-browser   : elle kapatmak isteyen için
+//   UserInteractive=false : Windows Service / arka plan olarak
+//     çalışıyorsak oturum yok, tarayıcı açmak anlamsız (ve hata verir).
+if (Environment.UserInteractive && !args.Contains("--no-browser"))
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        // Gerçekten dinlenen adresi kullanıyoruz - yapılandırmadan
+        // tahmin etmek yerine (Urls/ASPNETCORE_URLS/komut satırı hepsi
+        // burayı etkiler, sonuç yalnızca burada kesinleşir).
+        var url = app.Services
+            .GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()
+            .Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()
+            ?.Addresses.FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            logger.LogInformation("Tarayıcı açıldı: {Url}", url);
+        }
+        catch (Exception ex)
+        {
+            // Tarayıcı açılamazsa uygulama yine çalışıyor - adresi yaz, yeter.
+            logger.LogWarning(ex, "Tarayıcı açılamadı. Adresi elle aç: {Url}", url);
+        }
+    });
+}
 
 app.Run();

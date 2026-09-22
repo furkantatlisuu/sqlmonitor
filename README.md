@@ -138,7 +138,35 @@ Eşikleri `Monitor:Thresholds` altından kendi sunucunun normaline göre
 ayarla - hangi kontrolün neye baktığı `Services/HealthEvaluator.cs`
 içinde.
 
-### 5. Çalıştır
+### 5. EXE olarak yayınla (isteğe bağlı)
+
+Visual Studio olmadan, çift tıklanınca çalışan bir sürüm için:
+
+```
+dotnet publish -c Release -r win-x64 --self-contained true ^
+  -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true ^
+  -p:IncludeNativeLibrariesForSelfExtract=true ^
+  -o ..\SqlMonitor-exe
+```
+
+Çıkan klasörde `SqlMonitor.exe` (~48 MB), `appsettings.json` ve `wwwroot/`
+olur. **Hedef makinede .NET kurulu olmasına gerek yok** - çalışma zamanı
+exe'nin içinde.
+
+- Çift tıklayınca açılır, `http://localhost:51900` adresini dinler ve
+  **tarayıcıyı kendisi açar**. İstemezsen `SqlMonitor.exe --no-browser`.
+- Adres `appsettings.json` içindeki `Urls` ayarından gelir. Visual
+  Studio'dan F5 ile çalıştırırken bunun yerine
+  `Properties/launchSettings.json` geçerli olur; ikisi bilerek aynı portta.
+  **İkisini aynı anda çalıştırma** - ikincisi "port kullanımda" der.
+- Açılan konsol penceresi kapatılırsa uygulama durur. Sürekli açık
+  kalması gerekiyorsa (bildirimler ve geçmiş için gerekir) Windows
+  Service olarak kurmak daha doğru.
+- `appsettings.Local.json` **yayın çıktısına kopyalanmaz** (içinde yerel
+  sır olabilir, bkz. yukarısı). EXE'de de Slack bildirimi istiyorsan o
+  dosyayı exe'nin yanına elle koy.
+
+### 6. Çalıştır
 
 ```
 dotnet restore
