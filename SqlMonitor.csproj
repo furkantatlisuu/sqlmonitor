@@ -45,4 +45,27 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
+  <!--
+    YAYIN (publish) ayarları. Yalnızca `dotnet publish` sırasında
+    devreye girer (_IsPublishing) - Visual Studio'dan F5 ile çalıştırma
+    etkilenmez, orada eskisi gibi hızlı ve RID'siz derlenir.
+
+    Buradaki amaç: karşı tarafta .NET KURULU OLMASIN, klasörde yüzlerce
+    DLL DURMASIN. Çıktı tek bir SqlMonitor.exe + yanında wwwroot olur.
+    wwwroot tek dosyaya gömülemez (statik dosyalar diskten servis
+    ediliyor); exe'yi wwwroot'suz taşımak "/" adresinde 404 verir.
+
+    Bu ayarlar bilerek csproj'da: komut satırına yazılan bir bayrak
+    unutulur, bir dahaki yayın sessizce 400 dosyalık klasör üretirdi.
+  -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- SqlClient'ın 10 dilde hata mesajı klasörü; bize gereksiz. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
 </Project>
