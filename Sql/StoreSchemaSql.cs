@@ -108,6 +108,23 @@ public static class StoreSchemaSql
         );
         GO
 
+        -- Olayın YAŞANDIĞI ANDAKİ kanıtı (JSON): "uzun süren sorgu var"
+        -- diyen bir olayın, hangi sorgu/prosedür olduğunu da söylemesi
+        -- için. Canlı DMV'den sonradan okunamaz - kullanıcı olaya
+        -- tıkladığında o oturum çoktan bitmiş olur; bu yüzden olay
+        -- yazılırken saklanıyor.
+        --
+        -- NVARCHAR(MAX) ama pratikte küçük: yalnızca sağlıksız olaylara,
+        -- en uzun 5 isteğe ve istek başına kırpılmış SQL metnine yazılıyor
+        -- (bkz. HealthEvaluator.TakeEvidence). Eski satırlar zaten
+        -- mevcut olay temizliğiyle birlikte siliniyor.
+        IF COL_LENGTH(N'mon.HealthEvent', N'Evidence') IS NULL
+            ALTER TABLE mon.HealthEvent ADD Evidence NVARCHAR(MAX) NULL;
+        GO
+
+        -- Evidence INCLUDE'a BİLEREK girmiyor: NVARCHAR(MAX) bir
+        -- nonclustered index'i şişirir ve zaman çizelgesi listesi zaten
+        -- içeriğini değil, yalnızca "var mı yok mu" bilgisini okuyor.
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_HealthEvent_Instance_Time')
         CREATE NONCLUSTERED INDEX IX_HealthEvent_Instance_Time
             ON mon.HealthEvent (InstanceId, OccurredAt DESC)

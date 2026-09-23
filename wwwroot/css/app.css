@@ -662,6 +662,58 @@ main { padding: var(--gap); }
 .tl-title { font-weight: 500; }
 .tl-detail { color: var(--ink-muted); font-size: 12px; margin-top: 1px; }
 
+/* --- Tıklanabilir olay: kanıt paneli ---------------------------- */
+
+/* Yalnızca kanıtı OLAN satırlar tıklanabilir görünür - imleç, her
+   satırın bir şey açacağı sözünü vermemeli. Vurgu rengi --c-cpu:
+   sekme çubuğuyla aynı "buraya tıklanır" rengi (--accent bir gradient,
+   metin rengi olarak kullanılamaz). */
+.tl-clickable { cursor: pointer; }
+.tl-clickable:hover .tl-title { color: var(--c-cpu); }
+
+.tl-more {
+    margin-left: 8px; padding: 1px 6px;
+    border: 1px solid var(--rule); border-radius: 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: .02em;
+    color: var(--ink-faint); vertical-align: 1px;
+}
+.tl-clickable:hover .tl-more,
+.tl-item.is-open  .tl-more { color: var(--c-cpu); border-color: var(--c-cpu); }
+.tl-item.is-open  .tl-more::after { content: " ▾"; }
+
+.tl-evidence { margin-top: 8px; cursor: auto; }
+
+.tl-ev {
+    padding: 8px 10px; margin-top: 6px;
+    background: var(--surface-2); border-radius: var(--radius-sm);
+    border-left: 2px solid var(--rule-strong);
+}
+.tl-ev:first-child { margin-top: 0; }
+
+.tl-ev-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.tl-ev-obj  { font-weight: 600; font-family: var(--mono); font-size: 12px; }
+.tl-ev-obj.is-adhoc { font-family: inherit; font-weight: 500; color: var(--ink-muted); }
+.tl-ev-dur  { color: var(--critical); font-size: 12px; font-weight: 600; }
+.tl-ev-spid { color: var(--ink-faint); font-size: 11px; }
+
+.tl-ev-meta { color: var(--ink-faint); font-size: 11px; margin-top: 2px; }
+
+/* Uzun bir prosedür gövdesi paneli sayfa boyu uzatmasın - kendi
+   içinde kayar. Metin seçilebilir kalmalı: kullanıcı buradan kopyalayıp
+   SSMS'te açacak. */
+.tl-ev-sql {
+    margin-top: 6px; padding: 7px 9px;
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow-y: auto;
+    user-select: text;
+}
+
+.tl-ev-note { color: var(--ink-faint); font-size: 12px; padding: 4px 0; }
+.tl-ev-note.is-error { color: var(--critical); }
+
 /* ================================================================ */
 /* Tablolar                                                         */
 /* ================================================================ */

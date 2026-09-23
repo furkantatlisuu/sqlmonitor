@@ -272,6 +272,7 @@ edilemez; panel boş kalır, sunucu rahat kalır.
 | `GET /api/instances` | Tanımlı instance listesi |
 | `GET /api/live/snapshot?instance=X` | Ekranın tamamı, tek JSON |
 | `GET /api/live/timeline?instance=X&hours=24` | Durum değişikliği olayları |
+| `GET /api/live/event/{id}/detail?instance=X` | O olay anında çalışan sorgular (hangi prosedür takıldı) |
 | `GET /api/live/session/{spid}/plan?instance=X` | Tek sorgunun metni ve planı |
 | `POST /api/live/kill-session` | Bir oturumu sonlandırır (`{instance, sessionId}`) |
 | `GET /api/live/missing-indexes?instance=X` | Eksik index önerileri |

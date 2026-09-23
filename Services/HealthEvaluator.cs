@@ -216,17 +216,28 @@ public sealed class HealthEvaluator
 
         // --- Uzun süren sorgu -----------------------------------------
         var longest = s.Activity.LongestRunningSeconds;
+        var longRunningSeverity =
+              longest >= t.LongRunningQueryCriticalSeconds ? Severity.Critical
+            : longest >= t.LongRunningQueryWarnSeconds ? Severity.Warning
+            : Severity.Healthy;
+
         checks.Add(new HealthCheck
         {
             Key = "long_running",
             Question = "Uzun süren sorgu var mı?",
             Category = Performance,
-            Severity = longest >= t.LongRunningQueryCriticalSeconds ? Severity.Critical
-                     : longest >= t.LongRunningQueryWarnSeconds ? Severity.Warning
-                     : Severity.Healthy,
+            Severity = longRunningSeverity,
             Finding = s.Activity.RunningRequests == 0
                 ? "çalışan kullanıcı isteği yok"
-                : $"{s.Activity.RunningRequests} çalışan istek, en uzunu {longest} sn"
+                : $"{s.Activity.RunningRequests} çalışan istek, en uzunu {longest} sn",
+
+            // "En uzunu 311 sn" tek başına işe yaramıyor - kullanıcı
+            // HANGİ sorgunun 311 sn sürdüğünü görmek istiyor. O oturum
+            // birkaç dakika içinde biteceği için sonradan bakılamaz;
+            // olayla birlikte şimdi saklanıyor.
+            Evidence = longRunningSeverity == Severity.Healthy
+                ? null
+                : TakeEvidence(s.Activity.Requests)
         });
 
         // --- Unutulmuş transaction ------------------------------------
@@ -842,6 +853,45 @@ public sealed class HealthEvaluator
                 .ToList()
         };
     }
+
+    /// <summary>
+    /// Olayla birlikte saklanacak kanıt satırlarını seçer: en uzun süren
+    /// istekler, en uzundan kısaya.
+    ///
+    /// Sınırlar bilerek dar. Bu JSON her sağlıksız olayla birlikte
+    /// mon.HealthEvent'e yazılıyor; sınırsız bırakılsaydı 200 oturumlu
+    /// yoğun bir anda tek bir satır megabaytlara çıkar, tablo da
+    /// geçmişi tutulamaz hâle gelirdi. 5 istek "hangisi takıldı"
+    /// sorusunu cevaplamaya yeter; gerisi zaten aynı hikâyenin tekrarı.
+    /// SQL metni de kırpılıyor - 400 satırlık bir prosedür gövdesini
+    /// geçmişe yazmanın faydası yok, çalışan ifade zaten başta geliyor.
+    /// </summary>
+    private const int EvidenceMaxRows = 5;
+    private const int EvidenceMaxSqlChars = 1200;
+
+    private static List<EvidenceRow> TakeEvidence(IEnumerable<RequestRow> requests)
+        => requests
+            .OrderByDescending(r => r.ElapsedMs)
+            .Take(EvidenceMaxRows)
+            .Select(r => new EvidenceRow
+            {
+                SessionId = r.SessionId,
+                ObjectName = r.ObjectName,
+                SqlText = r.SqlText.Length > EvidenceMaxSqlChars
+                    ? r.SqlText[..EvidenceMaxSqlChars] + "…"
+                    : r.SqlText,
+                DatabaseName = r.DatabaseName,
+                LoginName = r.LoginName,
+                HostName = r.HostName,
+                ProgramName = r.ProgramName,
+                Status = r.Status,
+                WaitType = r.WaitType,
+                ElapsedSeconds = r.ElapsedMs / 1000,
+                CpuMs = r.CpuMs,
+                LogicalReads = r.LogicalReads,
+                BlockedBy = r.BlockedBy
+            })
+            .ToList();
 
     private static HealthCheck Unknown(string key, string question, string category, string reason)
         => new()

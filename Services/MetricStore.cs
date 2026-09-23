@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
@@ -423,7 +424,10 @@ public sealed class MetricStore
         const string sql = """
             SELECT TOP (100)
                 EventId, OccurredAtUtc = OccurredAt, RuleKey,
-                Severity, PrevSeverity, Title, Detail
+                Severity, PrevSeverity, Title, Detail,
+                -- Kanıdın kendisi değil, yalnızca varlığı: ekran bununla
+                -- satırı tıklanabilir yapıyor, içeriği tıklanınca çekiyor.
+                HasDetail = CONVERT(bit, CASE WHEN e.Evidence IS NULL THEN 0 ELSE 1 END)
             FROM mon.HealthEvent AS e
             JOIN mon.Instance   AS i ON i.InstanceId = e.InstanceId
             WHERE i.Name = @Name
@@ -456,7 +460,7 @@ public sealed class MetricStore
     /// </summary>
     public async Task<Severity?> RecordEventIfChangedAsync(
         int instanceId, string ruleKey, Severity current,
-        string title, string? detail, CancellationToken ct)
+        string title, string? detail, string? evidenceJson, CancellationToken ct)
     {
         const string sql = """
             DECLARE @Prev tinyint =
@@ -474,10 +478,10 @@ public sealed class MetricStore
                 RETURN;   -- durum değişmedi
 
             INSERT INTO mon.HealthEvent
-                (InstanceId, OccurredAt, RuleKey, Severity, PrevSeverity, Title, Detail)
+                (InstanceId, OccurredAt, RuleKey, Severity, PrevSeverity, Title, Detail, Evidence)
             OUTPUT INSERTED.PrevSeverity
             VALUES
-                (@InstanceId, SYSUTCDATETIME(), @RuleKey, @Severity, ISNULL(@Prev, 0), @Title, @Detail);
+                (@InstanceId, SYSUTCDATETIME(), @RuleKey, @Severity, ISNULL(@Prev, 0), @Title, @Detail, @Evidence);
             """;
 
         await using var conn = _factory.CreateStoreConnection();
@@ -489,11 +493,68 @@ public sealed class MetricStore
             RuleKey = ruleKey,
             Severity = (byte)current,
             Title = title,
-            Detail = detail
+            Detail = detail,
+            Evidence = evidenceJson
         }, cancellationToken: ct));
 
         return prev is byte b ? (Severity)b : null;
     }
+
+    /// <summary>
+    /// Tek bir olayın kanıt satırları - kullanıcı zaman çizelgesinde o
+    /// olaya tıkladığında.
+    ///
+    /// instanceName filtresi güvenlik değil, DOĞRULUK içindir: EventId
+    /// global bir sayaç, ekran hangi sunucuya bakıyorsa o sunucunun
+    /// olayını istiyor. Eşleşmezse boş dönüyoruz - başka bir sunucunun
+    /// sorgu metnini yanlışlıkla göstermektense hiç göstermemek iyidir.
+    /// </summary>
+    public async Task<List<EvidenceRow>> GetEventEvidenceAsync(
+        string instanceName, long eventId, CancellationToken ct)
+    {
+        const string sql = """
+            SELECT e.Evidence
+            FROM mon.HealthEvent AS e
+            JOIN mon.Instance    AS i ON i.InstanceId = e.InstanceId
+            WHERE e.EventId = @EventId AND i.Name = @Name;
+            """;
+
+        await using var conn = _factory.CreateStoreConnection();
+        await conn.OpenAsync(ct);
+
+        var json = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+            sql, new { Name = instanceName, EventId = eventId }, cancellationToken: ct));
+
+        if (string.IsNullOrWhiteSpace(json)) return new List<EvidenceRow>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<EvidenceRow>>(json, EvidenceJson)
+                   ?? new List<EvidenceRow>();
+        }
+        catch (JsonException ex)
+        {
+            // Eski/bozuk bir satır yüzünden ekranın patlamasına değmez.
+            _log.LogWarning(ex, "Olay {EventId} kanıtı okunamadı", eventId);
+            return new List<EvidenceRow>();
+        }
+    }
+
+    /// <summary>
+    /// Kanıt JSON'u ekrana da aynı adlarla gidiyor (ASP.NET Core'un
+    /// varsayılanı camelCase), depoda da öyle dursun - iki yerde iki
+    /// farklı yazım, ileride birinin sessizce boş gelmesi demek olurdu.
+    /// </summary>
+    private static readonly JsonSerializerOptions EvidenceJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static string? SerializeEvidence(List<EvidenceRow>? rows)
+        => rows is null || rows.Count == 0
+            ? null
+            : JsonSerializer.Serialize(rows, EvidenceJson);
 
     public async Task LogCollectorRunAsync(
         int instanceId, DateTime startedAt, int durationMs,

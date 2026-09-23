@@ -216,7 +216,8 @@ public sealed class CollectorService : BackgroundService
 
             var previous = await store.RecordEventIfChangedAsync(
                 instanceId, check.Key, check.Severity,
-                check.Question, check.Finding, ct);
+                check.Question, check.Finding,
+                MetricStore.SerializeEvidence(check.Evidence), ct);
 
             // Slack, instance başına AÇIK/KAPALI - global SlackWebhookUrl
             // tek başına yeterli değil, kullanıcı hangi sunucunun Critical'inin

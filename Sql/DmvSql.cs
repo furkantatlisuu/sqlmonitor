@@ -342,7 +342,20 @@ public static class DmvSql
                                              WHEN -1 THEN DATALENGTH(t.text)
                                              ELSE r.statement_end_offset
                                          END - r.statement_start_offset) / 2) + 1),
-                                     N''))
+                                     N'')),
+
+            /*  Çalışan ifade bir prosedür/fonksiyon içindeyse ADI.
+                SqlText yukarıda BİLEREK tek ifadeye kırpıldığı için
+                "hangi prosedür" bilgisi oradan okunamaz - ayrıca lazım.
+
+                Ad-hoc bir batch'te objectid NULL gelir, o zaman '' döner
+                ve ekran yalnızca sorgu metnini gösterir. OBJECT_NAME'in
+                db bağlamı dışından çalışabilmesi için dbid'yi de
+                veriyoruz; yetki yoksa yine NULL, yine '' - bu yüzden
+                sorgu hata vermez, sadece adı boş kalır. */
+            ObjectName           = ISNULL(
+                                     OBJECT_SCHEMA_NAME(t.objectid, t.dbid) + N'.' +
+                                     OBJECT_NAME(t.objectid, t.dbid), N'')
         FROM sys.dm_exec_sessions AS s WITH (NOLOCK)
         JOIN sys.dm_exec_requests AS r WITH (NOLOCK)
           ON r.session_id = s.session_id

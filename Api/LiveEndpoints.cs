@@ -102,6 +102,32 @@ public static class LiveEndpoints
         });
 
         // -------------------------------------------------------------
+        // Bir olayın kanıtı: "uzun süren sorgu var" diyen olayın HANGİ
+        // sorgu olduğu.
+        //
+        // AYRI UÇ OLMASI KASITLI, /live/session/{spid}/plan ile aynı
+        // gerekçeyle: 100 olaylık çizelge her yenilemede megabaytlarca
+        // SQL metni taşımasın, yalnızca tıklanan olayınki gelsin.
+        //
+        // Canlı DMV'ye BAKMIYOR - olay anında yazılmış kaydı okuyor.
+        // Kullanıcı olaya saatler sonra tıklıyor; o oturum çoktan bitmiş
+        // olur, DMV'de aramanın anlamı yok.
+        // -------------------------------------------------------------
+        api.MapGet("/live/event/{eventId:long}/detail", async (
+            long eventId,
+            string? instance,
+            MetricStore store,
+            InstanceRegistry registry,
+            CancellationToken ct) =>
+        {
+            var target = registry.Find(instance);
+            if (target is null) return Results.NotFound();
+
+            var rows = await store.GetEventEvidenceAsync(target.Name, eventId, ct);
+            return Results.Ok(rows);
+        });
+
+        // -------------------------------------------------------------
         // Tek bir oturumun sorgu metni ve planı.
         //
         // AYRI UÇ OLMASI KASITLI: plan XML'i çekmek pahalıdır. Toplu

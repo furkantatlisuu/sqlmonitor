@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SqlMonitor.Models;
 
 public enum Severity
@@ -248,6 +250,12 @@ public sealed class RequestRow
     public int BlockedBy { get; set; }
     public int OpenTransactionCount { get; set; }
     public string SqlText { get; set; } = "";
+
+    /// <summary>
+    /// Çalışan ifadeyi barındıran prosedür/fonksiyon adı
+    /// ("dbo.sp_CariHesapKapat"). Ad-hoc sorgularda boş.
+    /// </summary>
+    public string ObjectName { get; set; } = "";
 }
 
 public sealed class BlockingPanel
@@ -290,6 +298,41 @@ public sealed class HealthCheck
     public int ScoreImpact { get; set; }
     public string Category { get; set; } = "";
     public string? Remedy { get; set; }
+
+    /// <summary>
+    /// "Neye bakarak böyle dedin?" - bulgunun dayandığı somut satırlar,
+    /// olayın yaşandığı andan. mon.HealthEvent.Evidence'a yazılır, sonra
+    /// kullanıcı zaman çizelgesinde olaya tıklayınca geri okunur.
+    ///
+    /// Ekran anlık görüntüsünde (snapshot JSON) GÖNDERİLMEZ: aynı veri
+    /// zaten Activity.Requests içinde tam hâliyle duruyor, iki kez
+    /// yollamanın anlamı yok. Burası sadece "geçmişe not düş" yolu.
+    /// </summary>
+    [JsonIgnore]
+    public List<EvidenceRow>? Evidence { get; set; }
+}
+
+/// <summary>
+/// Bir olayın kanıt satırı - olay anında çalışmakta olan tek bir istek.
+/// RequestRow'un kırpılmış hâli: geçmişe yazıldığı için yalnızca
+/// "hangi sorguydu, ne kadar sürdü, kim çalıştırdı" soruları için
+/// gereken alanlar var.
+/// </summary>
+public sealed class EvidenceRow
+{
+    public int SessionId { get; set; }
+    public string ObjectName { get; set; } = "";
+    public string SqlText { get; set; } = "";
+    public string DatabaseName { get; set; } = "";
+    public string LoginName { get; set; } = "";
+    public string HostName { get; set; } = "";
+    public string ProgramName { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string WaitType { get; set; } = "";
+    public long ElapsedSeconds { get; set; }
+    public long CpuMs { get; set; }
+    public long LogicalReads { get; set; }
+    public int BlockedBy { get; set; }
 }
 
 public sealed class TimelineEntry
@@ -301,6 +344,14 @@ public sealed class TimelineEntry
     public Severity PrevSeverity { get; set; }
     public string Title { get; set; } = "";
     public string? Detail { get; set; }
+
+    /// <summary>
+    /// Bu olayın tıklanabilir bir kanıtı var mı. Kanıdın KENDİSİ listede
+    /// gelmiyor - 100 olaylık bir çizelge o zaman megabaytlarca SQL metni
+    /// taşırdı. Ekran bunu yalnızca satırı tıklanabilir yapmak için
+    /// kullanıyor, içerik tıklanınca ayrı uçtan çekiliyor.
+    /// </summary>
+    public bool HasDetail { get; set; }
 }
 
 public sealed class ErrorLogEntry

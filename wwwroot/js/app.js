@@ -28,6 +28,10 @@ const state = {
     lastTimelineAt: 0,
     lastSnapshot: null,
 
+    // Olay kanıtı: eventId -> kanıt satırları. Geçmiş bir olayın kanıtı
+    // değişmediği için bir kez çekilip tutuluyor (bkz. showEventDetail).
+    eventEvidence: {},
+
     // Index Analizi bilerek 1 saniyelik döngünün dışında - eksik index önerileri dakikalar
     // içinde önemli ölçüde değişmez, saniyelik tazelik gerekmiyor.
     miLoaded: false,
@@ -1614,14 +1618,114 @@ function renderTimeline(entries) {
         return;
     }
 
+    // Çizelge her yenilemede baştan çiziliyor; açık paneller kapanmasın
+    // diye hangilerinin açık olduğu önce not ediliyor, çizimden sonra
+    // aynıları (önbellekten, anında) geri açılıyor.
+    const open = new Set(
+        Array.from($('timeline').querySelectorAll('.tl-item.is-open'))
+             .map(li => li.dataset.event));
+
     $('timeline').innerHTML = entries.map(e => `
-        <li class="tl-item ${sevClass(e.severity)}">
+        <li class="tl-item ${sevClass(e.severity)}${e.hasDetail ? ' tl-clickable' : ''}"
+            ${e.hasDetail ? `data-event="${e.eventId}"` : ''}>
             <span class="tl-time">${dayTime(e.occurredAtUtc)}</span>
             <div>
-                <p class="tl-title">${esc(e.title)} — ${esc(sevLabel(e.severity))}</p>
+                <p class="tl-title">${esc(e.title)} — ${esc(sevLabel(e.severity))}${
+                    e.hasDetail ? '<span class="tl-more">ayrıntı</span>' : ''}</p>
                 ${e.detail ? `<p class="tl-detail">${esc(e.detail)}</p>` : ''}
+                ${e.hasDetail ? '<div class="tl-evidence" hidden></div>' : ''}
             </div>
         </li>`).join('');
+
+    $('timeline').querySelectorAll('.tl-clickable').forEach(li => {
+        li.addEventListener('click', () => toggleEventDetail(li));
+
+        // Panelin İÇİNE tıklamak satırı kapatmasın - kullanıcı oradaki
+        // sorgu metnini seçip kopyalayacak, ilk sürüklemede kapanırsa
+        // panel kullanılamaz hâle gelir.
+        li.querySelector('.tl-evidence')
+          ?.addEventListener('click', (ev) => ev.stopPropagation());
+
+        if (open.has(li.dataset.event)) showEventDetail(li);
+    });
+}
+
+function toggleEventDetail(li) {
+    const box = li.querySelector('.tl-evidence');
+    if (!box) return;
+
+    if (!box.hidden) {              // açıksa kapat
+        box.hidden = true;
+        li.classList.remove('is-open');
+        return;
+    }
+    showEventDetail(li);
+}
+
+/** Kanıt BİR KEZ çekilir ve state.eventEvidence'ta tutulur. Geçmiş bir
+    olayın kanıtı tanımı gereği değişmez; ayrıca çizelge 30 saniyede bir
+    yeniden çiziliyor - önbellek olmasaydı açık bir panel her yenilemede
+    "Yükleniyor…"a düşerdi. */
+async function showEventDetail(li) {
+    const box = li.querySelector('.tl-evidence');
+    const id = li.dataset.event;
+
+    box.hidden = false;
+    li.classList.add('is-open');
+
+    const cached = state.eventEvidence[id];
+    if (cached) { renderEventEvidence(box, cached); return; }
+
+    box.innerHTML = '<p class="tl-ev-note">Yükleniyor…</p>';
+    try {
+        const url = `/api/live/event/${id}/detail?instance=` +
+                    encodeURIComponent(state.instance || '');
+        const rows = await getJson(url);
+        state.eventEvidence[id] = rows;
+        renderEventEvidence(box, rows);
+    } catch (err) {
+        // Hata ÖNBELLEĞE GİRMİYOR: geçici bir ağ hatasından sonra
+        // kullanıcı tekrar tıkladığında yeniden denensin.
+        box.innerHTML = `<p class="tl-ev-note is-error">Alınamadı: ${esc(err.message)}</p>`;
+    }
+}
+
+function renderEventEvidence(box, rows) {
+    if (!rows || rows.length === 0) {
+        box.innerHTML =
+            '<p class="tl-ev-note">Bu olay için kayıtlı sorgu bulunamadı.</p>';
+        return;
+    }
+
+    box.innerHTML = rows.map(r => {
+        // Ad-hoc bir sorguda prosedür adı yoktur; "" yerine ne olduğunu
+        // söylemek, boş bir başlıktan iyidir.
+        const name = r.objectName
+            ? `<span class="tl-ev-obj">${esc(r.objectName)}</span>`
+            : '<span class="tl-ev-obj is-adhoc">ad-hoc sorgu</span>';
+
+        const meta = [
+            r.databaseName && `veritabanı: ${r.databaseName}`,
+            r.loginName && `kullanıcı: ${r.loginName}`,
+            r.hostName && `makine: ${r.hostName}`,
+            r.programName && `uygulama: ${r.programName}`,
+            r.waitType && `bekleme: ${r.waitType}`,
+            r.blockedBy > 0 && `SPID ${r.blockedBy} tarafından bloklanmış`
+        ].filter(Boolean).map(esc).join(' · ');
+
+        return `
+            <div class="tl-ev">
+                <p class="tl-ev-head">
+                    ${name}
+                    <span class="tl-ev-dur">${duration(r.elapsedSeconds * 1000)}</span>
+                    <span class="tl-ev-spid">SPID ${r.sessionId}</span>
+                </p>
+                <p class="tl-ev-meta">${meta}</p>
+                <pre class="tl-ev-sql">${r.sqlText
+                    ? highlightSql(r.sqlText)
+                    : '(sorgu metni alınamadı)'}</pre>
+            </div>`;
+    }).join('');
 }
 
 /** Ortalama süre/CPU sütunları için: duration() saat/dakikaya yuvarlar, buradaki
@@ -2478,6 +2582,7 @@ function wireEvents() {
     $('instanceSelect').addEventListener('change', async (e) => {
         state.instance = e.target.value;
         state.lastTimelineAt = 0;   // instance degisti, cizelge hemen tazelensin
+        state.eventEvidence = {};   // EventId global; eski sunucunun kanitini tasima
 
         // Bu sekmeler "bir kez yükle, tekrar isteme" mantığıyla çalışıyor
         // (bkz. loadMissingIndexes ve benzerleri) - instance değişmeden
