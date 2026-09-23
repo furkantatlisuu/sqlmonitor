@@ -278,6 +278,12 @@ public sealed class BlockRow
     public string DatabaseName { get; set; } = "";
     public string BlockedSql { get; set; } = "";
     public string BlockerSql { get; set; } = "";
+
+    /// <summary>Bekleyen isteğin prosedür adı; ad-hoc ise boş.</summary>
+    public string BlockedObjectName { get; set; } = "";
+
+    /// <summary>Kilidi TUTANIN prosedür adı; ad-hoc ise boş.</summary>
+    public string BlockerObjectName { get; set; } = "";
 }
 
 public sealed class HealthPanel
@@ -305,11 +311,62 @@ public sealed class HealthCheck
     /// kullanıcı zaman çizelgesinde olaya tıklayınca geri okunur.
     ///
     /// Ekran anlık görüntüsünde (snapshot JSON) GÖNDERİLMEZ: aynı veri
-    /// zaten Activity.Requests içinde tam hâliyle duruyor, iki kez
-    /// yollamanın anlamı yok. Burası sadece "geçmişe not düş" yolu.
+    /// zaten Activity içinde tam hâliyle duruyor, iki kez yollamanın
+    /// anlamı yok. Burası sadece "geçmişe not düş" yolu.
     /// </summary>
     [JsonIgnore]
-    public List<EvidenceRow>? Evidence { get; set; }
+    public EventEvidence? Evidence { get; set; }
+}
+
+/// <summary>
+/// Bir olayın kanıtı. Her kuralın kanıdı aynı şekilde DEĞİL: uzun süren
+/// sorgu tek tek istekler, bloklama ise bekleyen/bekleten ÇİFTLERİ
+/// demek. İkisini tek listeye zorlamak hikâyeyi bozardı, o yüzden
+/// Kind ayırıyor ve ekran ona göre çiziyor.
+/// </summary>
+public sealed class EventEvidence
+{
+    public const string KindRequests = "requests";
+    public const string KindBlocking = "blocking";
+
+    public string Kind { get; set; } = "";
+
+    /// <summary>Kind = "requests" ise dolu.</summary>
+    public List<EvidenceRow>? Requests { get; set; }
+
+    /// <summary>Kind = "blocking" ise dolu.</summary>
+    public List<BlockEvidenceRow>? Blocks { get; set; }
+}
+
+/// <summary>
+/// Bir bloklama çifti: kim bekliyor, kim bekletiyor, ne kadardır.
+///
+/// BEKLETEN BAŞINA TEK SATIR. Bir oturum 20 oturumu birden bekletiyorsa
+/// 20 satır yazmak aynı cümleyi 20 kez tekrarlamak olurdu - bunun
+/// yerine en uzun bekleyen örnek olarak veriliyor, kaçını bekletdiğini
+/// BlockedCount söylüyor.
+/// </summary>
+public sealed class BlockEvidenceRow
+{
+    public int BlockedSessionId { get; set; }
+    public int BlockingSessionId { get; set; }
+
+    /// <summary>Bu bekletenin toplam kaç oturumu beklettiği.</summary>
+    public int BlockedCount { get; set; }
+
+    /// <summary>
+    /// Zincirin tepesi mi - yani kendisi bloklanmıyor mu. Müdahale
+    /// edilecek oturum budur; ortadaki bir oturumu öldürmek işe yaramaz.
+    /// </summary>
+    public bool IsHeadBlocker { get; set; }
+    public string BlockedObjectName { get; set; } = "";
+    public string BlockerObjectName { get; set; } = "";
+    public string BlockedSql { get; set; } = "";
+    public string BlockerSql { get; set; } = "";
+    public string DatabaseName { get; set; } = "";
+    public string WaitType { get; set; } = "";
+    public string WaitResource { get; set; } = "";
+    public long WaitSeconds { get; set; }
 }
 
 /// <summary>

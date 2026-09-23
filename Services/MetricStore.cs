@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
@@ -509,7 +510,7 @@ public sealed class MetricStore
     /// olayını istiyor. Eşleşmezse boş dönüyoruz - başka bir sunucunun
     /// sorgu metnini yanlışlıkla göstermektense hiç göstermemek iyidir.
     /// </summary>
-    public async Task<List<EvidenceRow>> GetEventEvidenceAsync(
+    public async Task<EventEvidence?> GetEventEvidenceAsync(
         string instanceName, long eventId, CancellationToken ct)
     {
         const string sql = """
@@ -525,18 +526,18 @@ public sealed class MetricStore
         var json = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
             sql, new { Name = instanceName, EventId = eventId }, cancellationToken: ct));
 
-        if (string.IsNullOrWhiteSpace(json)) return new List<EvidenceRow>();
+        if (string.IsNullOrWhiteSpace(json)) return null;
 
         try
         {
-            return JsonSerializer.Deserialize<List<EvidenceRow>>(json, EvidenceJson)
-                   ?? new List<EvidenceRow>();
+            return JsonSerializer.Deserialize<EventEvidence>(json, EvidenceJson);
         }
         catch (JsonException ex)
         {
-            // Eski/bozuk bir satır yüzünden ekranın patlamasına değmez.
+            // Eski/bozuk bir satır yüzünden ekranın patlamasına değmez;
+            // kullanıcı "kayıtlı sorgu bulunamadı" görür, uygulama döner.
             _log.LogWarning(ex, "Olay {EventId} kanıtı okunamadı", eventId);
-            return new List<EvidenceRow>();
+            return null;
         }
     }
 
@@ -548,13 +549,19 @@ public sealed class MetricStore
     private static readonly JsonSerializerOptions EvidenceJson = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+
+        // Boş olan liste (requests ya da blocks - hangisi o olaya ait
+        // değilse) JSON'a hiç yazılmasın; her satırda taşınan gereksiz
+        // "blocks":null alanına gerek yok.
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public static string? SerializeEvidence(List<EvidenceRow>? rows)
-        => rows is null || rows.Count == 0
+    public static string? SerializeEvidence(EventEvidence? evidence)
+        => evidence is null || ((evidence.Requests?.Count ?? 0) == 0 &&
+                                (evidence.Blocks?.Count ?? 0) == 0)
             ? null
-            : JsonSerializer.Serialize(rows, EvidenceJson);
+            : JsonSerializer.Serialize(evidence, EvidenceJson);
 
     public async Task LogCollectorRunAsync(
         int instanceId, DateTime startedAt, int durationMs,

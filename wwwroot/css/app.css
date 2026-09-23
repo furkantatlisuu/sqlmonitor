@@ -698,6 +698,37 @@ main { padding: var(--gap); }
 
 .tl-ev-meta { color: var(--ink-faint); font-size: 11px; margin-top: 2px; }
 
+/* Bloklama çiftinde iki tarafı ayıran etiket. Rol, renkten değil
+   YAZIDAN okunuyor - renk yalnızca destek; "bekleten"i kırmızıya
+   boyayıp kullanıcının rengi çözmesini beklemek yanlış olurdu. */
+.tl-ev-role {
+    padding: 1px 6px; border-radius: 9px;
+    font-size: 10px; font-weight: 600; letter-spacing: .02em;
+}
+.tl-ev-role.is-blocker { color: var(--critical); background: var(--critical-soft); }
+.tl-ev-role.is-blocked { color: var(--warn);     background: var(--warn-soft); }
+
+/* "4 oturumu bekletiyor" - zararın büyüklüğü. Süreden ayrı bir bilgi:
+   uzun süre tek bir oturumu bekletmek ile kısa süre yirmi oturumu
+   bekletmek farklı sorunlar. */
+.tl-ev-count { color: var(--critical); font-size: 11px; font-weight: 600; }
+
+/* Zincirin tepesi: müdahale edilecek oturum. Kartın sol şeridi
+   koyulaşıyor ki listede göz doğrudan oraya gitsin. */
+.tl-ev.is-head { border-left-color: var(--critical); }
+.tl-ev-head-blocker {
+    padding: 1px 6px; border-radius: 9px;
+    border: 1px solid var(--critical); color: var(--critical);
+    font-size: 10px; font-weight: 600;
+}
+
+/* Çiftin ikinci yarısı: aynı kartın içinde, ince bir çizgiyle ayrılmış -
+   ayrı bir kart yapmak ikisinin İLİŞKİLİ olduğunu gizlerdi. */
+.tl-ev-second {
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px dashed var(--rule-strong);
+}
+
 /* Uzun bir prosedür gövdesi paneli sayfa boyu uzatmasın - kendi
    içinde kayar. Metin seçilebilir kalmalı: kullanıcı buradan kopyalayıp
    SSMS'te açacak. */

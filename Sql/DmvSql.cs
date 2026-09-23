@@ -432,8 +432,36 @@ public static class DmvSql
             WaitType          = ISNULL(r.wait_type, N''),
             WaitResource      = ISNULL(r.wait_resource, N''),
             DatabaseName      = ISNULL(DB_NAME(r.database_id), N''),
-            BlockedSql        = CONVERT(nvarchar(2000), ISNULL(bt.text, N'')),
-            BlockerSql        = CONVERT(nvarchar(2000), ISNULL(kt.text, N''))
+            /*  Bekleyen taraf için ŞU AN takılı olan tek ifadeyi kesiyoruz
+                (ActiveRequests ile aynı hesap): kilide hangi satırın
+                takıldığını görmek, 400 satırlık prosedür gövdesini
+                okumaktan çok daha işe yarar.
+
+                Bekleten tarafta bu mümkün DEĞİL: onun metni
+                most_recent_sql_handle'dan geliyor ve o handle'ın ifade
+                offset'i yok - bekleten çoğu zaman hiç sorgu çalıştırmıyor,
+                açık bir transaction'la öylece oturuyor. Orada tam metin
+                kalıyor; hangi prosedür olduğunu BlockerObjectName söylüyor. */
+            BlockedSql        = CONVERT(nvarchar(2000), ISNULL(
+                                  SUBSTRING(bt.text,
+                                    (r.statement_start_offset / 2) + 1,
+                                    ((CASE r.statement_end_offset
+                                          WHEN -1 THEN DATALENGTH(bt.text)
+                                          ELSE r.statement_end_offset
+                                      END - r.statement_start_offset) / 2) + 1),
+                                  N'')),
+            BlockerSql        = CONVERT(nvarchar(2000), ISNULL(kt.text, N'')),
+
+            /*  "Hangi prosedür blokluyor" sorusunun cevabı. Metinden
+                okunamaz: bir prosedür çağrısında sql_text prosedürün
+                GÖVDESİNİ döndürür, adını değil. Ad-hoc bir batch'te
+                objectid NULL gelir ve '' döneriz.  */
+            BlockedObjectName = ISNULL(
+                                  OBJECT_SCHEMA_NAME(bt.objectid, bt.dbid) + N'.' +
+                                  OBJECT_NAME(bt.objectid, bt.dbid), N''),
+            BlockerObjectName = ISNULL(
+                                  OBJECT_SCHEMA_NAME(kt.objectid, kt.dbid) + N'.' +
+                                  OBJECT_NAME(kt.objectid, kt.dbid), N'')
         FROM sys.dm_exec_requests AS r WITH (NOLOCK)
         OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS bt
         LEFT JOIN sys.dm_exec_connections AS c WITH (NOLOCK)

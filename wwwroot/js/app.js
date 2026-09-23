@@ -1680,9 +1680,9 @@ async function showEventDetail(li) {
     try {
         const url = `/api/live/event/${id}/detail?instance=` +
                     encodeURIComponent(state.instance || '');
-        const rows = await getJson(url);
-        state.eventEvidence[id] = rows;
-        renderEventEvidence(box, rows);
+        const evidence = await getJson(url);
+        state.eventEvidence[id] = evidence;
+        renderEventEvidence(box, evidence);
     } catch (err) {
         // Hata ÖNBELLEĞE GİRMİYOR: geçici bir ağ hatasından sonra
         // kullanıcı tekrar tıkladığında yeniden denensin.
@@ -1690,42 +1690,104 @@ async function showEventDetail(li) {
     }
 }
 
-function renderEventEvidence(box, rows) {
+/** Kanıt şekli kurala göre değişiyor (bkz. EventEvidence.Kind):
+    uzun süren sorgu = tek tek istekler, bloklama = bekleyen/bekleten
+    çiftleri. Ortak bir liste yapmak hikâyeyi bozardı. */
+function renderEventEvidence(box, evidence) {
+    const rows = evidence &&
+        (evidence.kind === 'blocking' ? evidence.blocks : evidence.requests);
+
     if (!rows || rows.length === 0) {
         box.innerHTML =
             '<p class="tl-ev-note">Bu olay için kayıtlı sorgu bulunamadı.</p>';
         return;
     }
 
-    box.innerHTML = rows.map(r => {
-        // Ad-hoc bir sorguda prosedür adı yoktur; "" yerine ne olduğunu
-        // söylemek, boş bir başlıktan iyidir.
-        const name = r.objectName
-            ? `<span class="tl-ev-obj">${esc(r.objectName)}</span>`
-            : '<span class="tl-ev-obj is-adhoc">ad-hoc sorgu</span>';
+    box.innerHTML = evidence.kind === 'blocking'
+        ? rows.map(blockEvidenceHtml).join('')
+        : rows.map(requestEvidenceHtml).join('');
+}
 
-        const meta = [
-            r.databaseName && `veritabanı: ${r.databaseName}`,
-            r.loginName && `kullanıcı: ${r.loginName}`,
-            r.hostName && `makine: ${r.hostName}`,
-            r.programName && `uygulama: ${r.programName}`,
-            r.waitType && `bekleme: ${r.waitType}`,
-            r.blockedBy > 0 && `SPID ${r.blockedBy} tarafından bloklanmış`
-        ].filter(Boolean).map(esc).join(' · ');
+/** Ad-hoc bir sorguda prosedür adı yoktur; "" yerine ne olduğunu
+    söylemek, boş bir başlıktan iyidir. */
+function evObjHtml(objectName) {
+    return objectName
+        ? `<span class="tl-ev-obj">${esc(objectName)}</span>`
+        : '<span class="tl-ev-obj is-adhoc">ad-hoc sorgu</span>';
+}
 
-        return `
-            <div class="tl-ev">
-                <p class="tl-ev-head">
-                    ${name}
-                    <span class="tl-ev-dur">${duration(r.elapsedSeconds * 1000)}</span>
-                    <span class="tl-ev-spid">SPID ${r.sessionId}</span>
-                </p>
-                <p class="tl-ev-meta">${meta}</p>
-                <pre class="tl-ev-sql">${r.sqlText
-                    ? highlightSql(r.sqlText)
-                    : '(sorgu metni alınamadı)'}</pre>
-            </div>`;
-    }).join('');
+function evSqlHtml(sqlText) {
+    return `<pre class="tl-ev-sql">${sqlText
+        ? highlightSql(sqlText)
+        : '(sorgu metni alınamadı)'}</pre>`;
+}
+
+function requestEvidenceHtml(r) {
+    const meta = [
+        r.databaseName && `veritabanı: ${r.databaseName}`,
+        r.loginName && `kullanıcı: ${r.loginName}`,
+        r.hostName && `makine: ${r.hostName}`,
+        r.programName && `uygulama: ${r.programName}`,
+        r.waitType && `bekleme: ${r.waitType}`,
+        r.blockedBy > 0 && `SPID ${r.blockedBy} tarafından bloklanmış`
+    ].filter(Boolean).map(esc).join(' · ');
+
+    return `
+        <div class="tl-ev">
+            <p class="tl-ev-head">
+                ${evObjHtml(r.objectName)}
+                <span class="tl-ev-dur">${duration(r.elapsedSeconds * 1000)}</span>
+                <span class="tl-ev-spid">SPID ${r.sessionId}</span>
+            </p>
+            <p class="tl-ev-meta">${meta}</p>
+            ${evSqlHtml(r.sqlText)}
+        </div>`;
+}
+
+/** Bloklamada asıl suçlu BEKLETEN taraftır - önce o geliyor, bekleyen
+    altında. Kullanıcının müdahale edeceği (gerekirse öldüreceği) oturum
+    bekleten olduğu için sıralama bilerek böyle. */
+function blockEvidenceHtml(b) {
+    const meta = [
+        b.databaseName && `veritabanı: ${b.databaseName}`,
+        b.waitType && `bekleme: ${b.waitType}`,
+        b.waitResource && `kaynak: ${b.waitResource}`
+    ].filter(Boolean).map(esc).join(' · ');
+
+    // Bir bekleten birden fazla oturumu tutuyorsa kaçını tuttuğunu
+    // söylüyoruz; altta gösterilen bekleyen, o gruptaki EN UZUN
+    // bekleyendir (bkz. TakeBlockingEvidence).
+    const kac = b.blockedCount > 1
+        ? `<span class="tl-ev-count">${b.blockedCount} oturumu bekletiyor</span>`
+        : '';
+    const ornek = b.blockedCount > 1 ? ' (en uzun bekleyen)' : '';
+
+    // Zincirin tepesi işaretleniyor: müdahale edilecek oturum odur,
+    // ortadaki bir oturumu öldürmek işe yaramaz (kendisi de bekliyor).
+    const bas = b.isHeadBlocker
+        ? '<span class="tl-ev-head-blocker">zincirin tepesi</span>'
+        : '';
+
+    return `
+        <div class="tl-ev${b.isHeadBlocker ? ' is-head' : ''}">
+            <p class="tl-ev-head">
+                <span class="tl-ev-role is-blocker">bekleten</span>
+                ${evObjHtml(b.blockerObjectName)}
+                <span class="tl-ev-spid">SPID ${b.blockingSessionId}</span>
+                ${bas}
+                ${kac}
+            </p>
+            ${evSqlHtml(b.blockerSql)}
+
+            <p class="tl-ev-head tl-ev-second">
+                <span class="tl-ev-role is-blocked">bekleyen${esc(ornek)}</span>
+                ${evObjHtml(b.blockedObjectName)}
+                <span class="tl-ev-dur">${duration(b.waitSeconds * 1000)} bekledi</span>
+                <span class="tl-ev-spid">SPID ${b.blockedSessionId}</span>
+            </p>
+            <p class="tl-ev-meta">${meta}</p>
+            ${evSqlHtml(b.blockedSql)}
+        </div>`;
 }
 
 /** Ortalama süre/CPU sütunları için: duration() saat/dakikaya yuvarlar, buradaki

@@ -80,7 +80,14 @@ public sealed class HealthEvaluator
             Remedy = s.Blocking.BlockedCount == 0
                 ? null
                 : "Baş engelleyiciyi incele. Öldürmeden önce ne yaptığına bak: " +
-                  "uzun süren bir raporsa öldürmek rollback maliyeti doğurur."
+                  "uzun süren bir raporsa öldürmek rollback maliyeti doğurur.",
+
+            // "3 bloklanan istek, baş engelleyici SPID 78" da tek başına
+            // yetmiyor: hangi prosedürün kimi beklettiği lazım. Kilit
+            // çözüldüğü anda bu bilgi DMV'den kaybolur.
+            Evidence = s.Blocking.Severity == Severity.Healthy
+                ? null
+                : TakeBlockingEvidence(s.Blocking.Chains)
         });
 
         // --- CPU ------------------------------------------------------
@@ -869,17 +876,76 @@ public sealed class HealthEvaluator
     private const int EvidenceMaxRows = 5;
     private const int EvidenceMaxSqlChars = 1200;
 
-    private static List<EvidenceRow> TakeEvidence(IEnumerable<RequestRow> requests)
-        => requests
+    private static string Clip(string s)
+        => s.Length > EvidenceMaxSqlChars ? s[..EvidenceMaxSqlChars] + "…" : s;
+
+    /// <summary>
+    /// Bloklama kanıtı. Aynı sınırlar (bkz. TakeEvidence) burada da
+    /// geçerli - üstelik her satır İKİ sorgu metni taşıdığı için daha
+    /// da önemli.
+    ///
+    /// BEKLETEN BAŞINA GRUPLANIYOR. Bir zincirde tek bir oturum çoğu
+    /// zaman birçok oturumu birden bekletir; her çifti ayrı yazmak
+    /// panelin aynı sorguyu beş kez göstermesi demekti. Gruptan en uzun
+    /// bekleyen örnek olarak seçiliyor, kaç oturumun beklediği sayıyla
+    /// veriliyor.
+    ///
+    /// SIRALAMA: önce BAŞ ENGELLEYİCİLER - kendisi bloklanmayan, yani
+    /// zincirin tepesindeki oturumlar. Kök neden odur; zincirin
+    /// ortasındaki bir oturum daha çok oturumu bekletiyor görünse bile
+    /// onu öldürmek işe yaramaz, kendisi de beklemektedir. Yalnızca
+    /// "kaç oturumu bekletiyor"a göre sıralasaydık panel kullanıcıyı
+    /// yanlış oturuma yönlendirirdi.
+    /// </summary>
+    private static EventEvidence TakeBlockingEvidence(IEnumerable<BlockRow> chains)
+    {
+        var rows = chains as ICollection<BlockRow> ?? chains.ToList();
+        var blocked = rows.Select(b => b.BlockedSessionId).ToHashSet();
+
+        return new EventEvidence
+        {
+            Kind = EventEvidence.KindBlocking,
+            Blocks = rows
+                .GroupBy(b => b.BlockingSessionId)
+                .OrderByDescending(g => !blocked.Contains(g.Key))   // baş engelleyici önce
+                .ThenByDescending(g => g.Count())
+                .ThenByDescending(g => g.Max(b => b.WaitTimeMs))
+                .Take(EvidenceMaxRows)
+                .Select(g =>
+                {
+                    var worst = g.OrderByDescending(b => b.WaitTimeMs).First();
+                    return new BlockEvidenceRow
+                    {
+                        BlockedSessionId = worst.BlockedSessionId,
+                        BlockingSessionId = g.Key,
+                        BlockedCount = g.Count(),
+                        IsHeadBlocker = !blocked.Contains(g.Key),
+                        BlockedObjectName = worst.BlockedObjectName,
+                        BlockerObjectName = worst.BlockerObjectName,
+                        BlockedSql = Clip(worst.BlockedSql),
+                        BlockerSql = Clip(worst.BlockerSql),
+                        DatabaseName = worst.DatabaseName,
+                        WaitType = worst.WaitType,
+                        WaitResource = worst.WaitResource,
+                        WaitSeconds = worst.WaitTimeMs / 1000
+                    };
+                })
+                .ToList()
+        };
+    }
+
+    private static EventEvidence TakeEvidence(IEnumerable<RequestRow> requests)
+        => new()
+        {
+            Kind = EventEvidence.KindRequests,
+            Requests = requests
             .OrderByDescending(r => r.ElapsedMs)
             .Take(EvidenceMaxRows)
             .Select(r => new EvidenceRow
             {
                 SessionId = r.SessionId,
                 ObjectName = r.ObjectName,
-                SqlText = r.SqlText.Length > EvidenceMaxSqlChars
-                    ? r.SqlText[..EvidenceMaxSqlChars] + "…"
-                    : r.SqlText,
+                SqlText = Clip(r.SqlText),
                 DatabaseName = r.DatabaseName,
                 LoginName = r.LoginName,
                 HostName = r.HostName,
@@ -891,7 +957,8 @@ public sealed class HealthEvaluator
                 LogicalReads = r.LogicalReads,
                 BlockedBy = r.BlockedBy
             })
-            .ToList();
+            .ToList()
+        };
 
     private static HealthCheck Unknown(string key, string question, string category, string reason)
         => new()

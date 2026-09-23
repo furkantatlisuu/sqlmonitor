@@ -123,8 +123,8 @@ public static class LiveEndpoints
             var target = registry.Find(instance);
             if (target is null) return Results.NotFound();
 
-            var rows = await store.GetEventEvidenceAsync(target.Name, eventId, ct);
-            return Results.Ok(rows);
+            var evidence = await store.GetEventEvidenceAsync(target.Name, eventId, ct);
+            return Results.Ok(evidence);
         });
 
         // -------------------------------------------------------------
