@@ -2113,6 +2113,7 @@ function renderMissingIndexes(data) {
 }
 
 async function loadMissingIndexes(opts = {}) {
+    if (!capAllowed("missingindexes")) return;
     if (state.miInFlight) return;
     if (!opts.force && state.miLoaded) return;
 
@@ -2299,6 +2300,7 @@ function renderTopProcedures(data) {
  * tıklamak mevcut yönü tersine çevirir - bkz. #spTable başlık tıklama.
  */
 async function loadTopProcedures(sort, dir, opts = {}) {
+    if (!capAllowed("topqueries")) return;
     if (state.spInFlight) return;
     if (!opts.force && state.spLoaded && sort === state.spSort && dir === state.spDir) return;
 
@@ -2462,7 +2464,18 @@ function renderUnusedProcedures(data) {
     });
 }
 
+/** Motorun desteklemediği bir paneli HİÇ yüklemiyoruz.
+    Sekmeyi/kartı gizlemek tek başına yetmedi: sunucu değiştirildiğinde
+    "aktif sekmeyi tazele" yolu hâlâ çağırıyor ve kullanıcı gizli bir
+    panelin altında kırmızı bir 502 görüyordu. Kapı en güvenli yerde,
+    yükleyicinin kendi içinde. */
+function capAllowed(key) {
+    const caps = state.lastSnapshot && state.lastSnapshot.capabilities;
+    return !caps || caps.indexOf(key) !== -1;
+}
+
 async function loadUnusedProcedures(opts = {}) {
+    if (!capAllowed('unusedprocedures')) return;
     if (state.unusedInFlight) return;
     if (!opts.force && state.unusedLoaded) return;
 
@@ -2607,6 +2620,7 @@ function renderAgDatabases(data) {
 }
 
 async function loadAlwaysOn(opts = {}) {
+    if (!capAllowed("alwayson")) return;
     if (state.agInFlight) return;
     if (!opts.force && state.agLoaded) return;
 
@@ -2713,6 +2727,7 @@ function renderJobsTable(data) {
 }
 
 async function loadAgentJobs(opts = {}) {
+    if (!capAllowed("agentjobs")) return;
     if (state.jobsInFlight) return;
     if (!opts.force && state.jobsLoaded) return;
 

@@ -360,7 +360,13 @@
             </div>
         </article>
 
-        <article class="card card-wide" data-accent="proc">
+        <!-- "En Yoğun Sorgular" ile AYNI sekmede ama AYRI bir yetenek.
+             Bu panel Query Store + plan cache karşılaştırmasına dayanıyor,
+             ikisi de SQL Server'a özgü. PostgreSQL'de en yakın karşılık
+             pg_stat_user_functions olurdu; o da varsayılan KAPALI
+             (track_functions = none) ve yalnızca fonksiyonları sayar,
+             prosedürleri değil. -->
+        <article class="card card-wide" data-accent="proc" data-cap="unusedprocedures">
             <header class="card-head">
                 <h2>Kullanılmayan Prosedürler</h2>
                 <p class="card-note">Plan cache + Query Store karşılaştırması — hiçbirinde görünmeyenler</p>
