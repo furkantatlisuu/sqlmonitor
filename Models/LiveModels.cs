@@ -94,6 +94,23 @@ public sealed class ServerInfo
     public double UptimeHours { get; set; }
     public int DatabaseCount { get; set; }
     public int OnlineDatabaseCount { get; set; }
+
+    /// <summary>
+    /// Bağlanılan adres - "localhost:5432" gibi. YALNIZCA PostgreSQL'de
+    /// dolu: orada başlıkta sunucu adı değil VERİTABANI adı yazıyor
+    /// (izleme veritabanı bazlı), o yüzden makinenin hangisi olduğu
+    /// ayrı bir etikete taşındı. SQL Server'da başlık zaten sunucu adı,
+    /// burası boş kalır.
+    /// </summary>
+    public string HostLabel { get; set; } = "";
+
+    /// <summary>
+    /// PostgreSQL'de izlenen veritabanı. pg_stat_user_tables,
+    /// pg_stat_user_indexes, pg_sequences ve pg_stat_statements
+    /// YALNIZCA bunu görür - ekranın bunu açıkça söylemesi gerekiyor,
+    /// yoksa kullanıcı sunucunun tamamına baktığını sanır.
+    /// </summary>
+    public string ScopeDatabase { get; set; } = "";
 }
 
 /// <summary>Üst şeritteki kutulardan biri.</summary>

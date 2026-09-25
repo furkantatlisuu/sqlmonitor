@@ -1019,11 +1019,22 @@ function renderVerdict(s) {
     const warning = open.length - critical;
     const healthy = checks.length - open.length;
 
-    $('verdictLine').textContent = open.length === 0
+    const hukum = open.length === 0
         ? 'Bütün kontroller temiz.'
         : critical > 0
             ? `${critical} kritik bulgu var, önce onlara bak.`
             : 'Kritik yok, açık uyarılar var.';
+
+    // PostgreSQL'de kapsamı AÇIKÇA söylüyoruz. Başlıkta veritabanı adı
+    // yazıyor ama sunucuda başka veritabanları da varsa kullanıcı
+    // sunucunun tamamına baktığını sanabilir: tablo, index ve sequence
+    // istatistikleri yalnızca bağlanılan veritabanını kapsıyor
+    // (bkz. PgSql dosyasının başındaki not).
+    const kapsam = s.server.scopeDatabase && s.server.databaseCount > 1
+        ? ` Tablo/index istatistikleri yalnızca "${s.server.scopeDatabase}" veritabanı için.`
+        : '';
+
+    $('verdictLine').textContent = hukum + kapsam;
 
     // Etiketler: sayilari renkli rozetlere tasiyarak tek bakista okunur hale getiriyoruz.
     $('verdictTags').innerHTML = [
@@ -1032,6 +1043,12 @@ function renderVerdict(s) {
         healthy  > 0 ? `<span class="tag is-healthy">${healthy} sağlıklı</span>` : '',
         `<span class="tag">${esc(s.server.edition || '')}${
             s.server.productVersion ? ' ' + esc(s.server.productVersion) : ''}</span>`,
+
+        // PostgreSQL'de başlıkta VERİTABANI adı yazıyor (izlemenin
+        // kapsamı o), makinenin hangisi olduğu buraya düşüyor.
+        // SQL Server'da başlık zaten sunucu adı, bu etiket boş gelir.
+        s.server.hostLabel
+            ? `<span class="tag">${esc(s.server.hostLabel)}</span>` : '',
 
         // Donanım etiketleri yalnızca DOLU olduklarında çiziliyor.
         // PostgreSQL kendi çekirdek/RAM sayısını bilmez; "0 çekirdek ·

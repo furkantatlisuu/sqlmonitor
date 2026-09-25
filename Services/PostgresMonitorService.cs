@@ -59,7 +59,7 @@ public sealed class PostgresMonitorService
 
         s.Capabilities = BuildCapabilities(hasStatements);
 
-        s.Server = await SafeAsync(s, "server", () => ReadServerAsync(conn, ct)) ?? new ServerInfo();
+        s.Server = await SafeAsync(s, "server", () => ReadServerAsync(conn, instance, ct)) ?? new ServerInfo();
 
         var dbs = await SafeAsync(s, "databases", () => ReadDatabasesAsync(conn, ct))
                   ?? new List<PgDatabaseRow>();
@@ -117,18 +117,43 @@ public sealed class PostgresMonitorService
         => await conn.ExecuteScalarAsync<bool?>(
                new CommandDefinition(PgSql.HasStatStatements, cancellationToken: ct)) ?? false;
 
-    private async Task<ServerInfo> ReadServerAsync(DbConnection conn, CancellationToken ct)
+    /// <summary>
+    /// Başlıkta VERİTABANI adı yazıyor, sunucu adı değil - PostgreSQL'de
+    /// izlemenin kapsamı veritabanıdır (tablo/index/sequence
+    /// istatistikleri yalnızca bağlanılan veritabanını görür), ekranın
+    /// da bunu söylemesi gerekiyor.
+    ///
+    /// inet_server_addr() BİLEREK kullanılmıyor: bağlandığınız adresi
+    /// değil, sunucunun kendi soket adresini döndürüyor - yerelde
+    /// "::1/128" gibi hem çirkin hem yanıltıcı bir değer çıkıyordu.
+    /// Bunun yerine kullanıcının forma yazdığı adresi gösteriyoruz;
+    /// zaten tanıdığı şey o.
+    /// </summary>
+    private async Task<ServerInfo> ReadServerAsync(
+        DbConnection conn, InstanceOptions instance, CancellationToken ct)
     {
         var row = await QueryOne<PgServerRow>(conn, PgSql.ServerInfo, ct);
         if (row is null) return new ServerInfo();
 
         return new ServerInfo
         {
-            ServerName = row.ServerName,
+            ServerName = row.DatabaseName,
+            ScopeDatabase = row.DatabaseName,
+            HostLabel = HostLabelOf(instance),
             ProductVersion = row.ProductVersion,
             Edition = row.Edition,
             StartTimeUtc = row.StartTime.ToUniversalTime()
         };
+    }
+
+    private static string HostLabelOf(InstanceOptions instance)
+    {
+        try
+        {
+            var b = new Npgsql.NpgsqlConnectionStringBuilder(instance.ConnectionString);
+            return b.Port == 5432 ? b.Host ?? "" : $"{b.Host}:{b.Port}";
+        }
+        catch { return ""; }
     }
 
     private async Task<List<PgDatabaseRow>> ReadDatabasesAsync(DbConnection conn, CancellationToken ct)
