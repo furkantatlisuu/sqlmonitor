@@ -349,6 +349,14 @@ public sealed class EventEvidence
     public List<QueryEvidenceRow>? Queries { get; set; }
 
     /// <summary>
+    /// Kind = "queries" iken listenin NEYE GÖRE sıralandığı: "disk" ya
+    /// da "cpu". Ekran öne çıkardığı sayıyı buna göre seçiyor - sıralama
+    /// diskten okumaya göreyken başlıkta önbellek okumasını göstermek,
+    /// kullanıcıyı listenin neden o sırada olduğu konusunda yanıltırdı.
+    /// </summary>
+    public string? Metric { get; set; }
+
+    /// <summary>
     /// Kullanıcıya "bu listede ne görüyorsun" diye bir cümle. Özellikle
     /// plan cache sayıları için ŞART: rakamlar birikimli, "şu an" değil.
     /// Bunu yazmadan liste yanıltıcı olur.

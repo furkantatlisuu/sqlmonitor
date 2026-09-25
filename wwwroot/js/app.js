@@ -1409,7 +1409,7 @@ function renderCheckEvidence(box, evidence) {
     if (evidence && evidence.kind === 'queries') {
         const rows = evidence.queries || [];
         box.innerHTML = not + (rows.length
-            ? rows.map(queryEvidenceHtml).join('')
+            ? rows.map(q => queryEvidenceHtml(q, evidence.metric)).join('')
             : '<p class="tl-ev-note">Bu pencerede çalışmış sorgu bulunamadı.</p>');
         return;
     }
@@ -1420,7 +1420,27 @@ function renderCheckEvidence(box, evidence) {
     box.innerHTML = not + tmp.innerHTML;
 }
 
-function queryEvidenceHtml(q) {
+/** Öne çıkan sayı, listenin SIRALANDIĞI ölçüye göre seçilir. Sıralama
+    diskten okumaya göreyken başlıkta önbellek okumasını göstermek,
+    "bu neden en üstte?" sorusunu cevapsız bırakırdı. Diğer ölçüler
+    kayboluyor değil, alt satırda duruyor. */
+function queryEvidenceHtml(q, metric) {
+    const calls = Math.max(1, q.calls || 0);
+
+    let one, two, rest;
+    if (metric === 'cpu') {
+        one  = `${duration(q.totalCpuMs)} CPU`;
+        two  = `çağrı başına ${ms1(q.avgCpuMs)}`;
+        rest = `okuma ${pagesToSize(q.totalLogicalReads)} (çağrı başına ${pagesToMB(q.avgLogicalReads)}) · ` +
+               `diskten ${pagesToSize(q.totalPhysicalReads)}`;
+    } else {
+        // "disk" - varsayılan. RAM/PLE kartının sorduğu şey bu.
+        one  = `${pagesToSize(q.totalPhysicalReads)} diskten`;
+        two  = `çağrı başına ${pagesToMB(q.totalPhysicalReads / calls)}`;
+        rest = `önbellekten okuma ${pagesToSize(q.totalLogicalReads)} (çağrı başına ${pagesToMB(q.avgLogicalReads)}) · ` +
+               `CPU toplam ${duration(q.totalCpuMs)}`;
+    }
+
     const meta = [
         q.databaseName && `veritabanı: ${q.databaseName}`,
         `${num(q.calls, 0)} çağrı`,
@@ -1431,13 +1451,11 @@ function queryEvidenceHtml(q) {
         <div class="tl-ev">
             <p class="tl-ev-head">
                 ${evObjHtml(q.objectName)}
-                <span class="tl-ev-dur">${esc(pagesToSize(q.totalLogicalReads))} okuma</span>
-                <span class="tl-ev-spid">çağrı başına ${esc(pagesToMB(q.avgLogicalReads))}</span>
+                <span class="tl-ev-dur">${esc(one)}</span>
+                <span class="tl-ev-spid">${esc(two)}</span>
             </p>
             <p class="tl-ev-meta">${meta}</p>
-            <p class="tl-ev-meta">${esc(
-                `diskten okuma ${pagesToSize(q.totalPhysicalReads)} · ` +
-                `CPU toplam ${duration(q.totalCpuMs)}, çağrı başına ${ms1(q.avgCpuMs)}`)}</p>
+            <p class="tl-ev-meta">${esc(rest)}</p>
             ${evSqlHtml(q.sqlText)}
         </div>`;
 }

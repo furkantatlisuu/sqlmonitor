@@ -69,18 +69,25 @@ public sealed class CheckEvidenceService
 
         return checkKey.ToLowerInvariant() switch
         {
-            // PLE düşüklüğü = buffer pool'un sürekli tazelenmesi. Sebep
-            // neredeyse her zaman çok okuyan sorgulardır: büyük taramalar
-            // önbelleğe yeni sayfa doldurur, eskileri dışarı atar.
-            // "RAM az" değil, "gereksiz okuma çok" - kartın kendi
-            // tavsiyesi de bunu söylüyor.
-            "memory" => await TopQueriesAsync(conn, "qs.total_logical_reads",
-                $"Son {LookbackMinutes} dakikada çalışmış, EN ÇOK OKUMA yapan sorgular. " +
-                "PLE düşüklüğünün sebebi genelde buradadır: çok sayfa okuyan bir sorgu " +
-                "buffer pool'u sürekli tazeler. Sayılar sorgu plan cache'e girdiğinden " +
-                "beri birikimlidir, son çalışma zamanıyla birlikte okuyun.", ct),
+            // PLE = bir sayfanın buffer pool'da kalma süresi. Sayfa
+            // ancak yerine YENİ bir sayfa okunduğunda atılır, o da
+            // DİSKTEN okumadır. Önbellekten okuma (logical read) PLE'yi
+            // düşürmez - milyarlarca logical read yapan bir sorgu
+            // bellek açısından masum olabilir.
+            //
+            // Bu sıralama bir kez total_logical_reads'ti ve YANILTTI:
+            // gerçek PROD'da başa 8 TB okuyan ama diskten yalnızca
+            // 104 KB çeken bir kimlik sorgusu çıkıyor, PLE'yi asıl
+            // çökerten 155 milyon satırlık tablo taraması (2 çağrıda
+            // 8,4 GB disk) listede hiç görünmüyordu.
+            "memory" => await TopQueriesAsync(conn, "qs.total_physical_reads", "disk",
+                $"Son {LookbackMinutes} dakikada çalışmış, EN ÇOK DİSKTEN OKUYAN sorgular. " +
+                "PLE'yi düşüren budur: diskten gelen her sayfa, önbellekteki bir sayfanın " +
+                "yerini alır. Önbellekten okuma (ikinci satırdaki sayı) çoktur ama PLE'ye " +
+                "etkisi yoktur. Sayılar sorgu plan cache'e girdiğinden beri birikimlidir, " +
+                "son çalışma zamanıyla birlikte okuyun.", ct),
 
-            "cpu" => await TopQueriesAsync(conn, "qs.total_worker_time",
+            "cpu" => await TopQueriesAsync(conn, "qs.total_worker_time", "cpu",
                 $"Son {LookbackMinutes} dakikada çalışmış, EN ÇOK CPU harcayan sorgular. " +
                 "Sayılar sorgu plan cache'e girdiğinden beri birikimlidir, son çalışma " +
                 "zamanıyla birlikte okuyun.", ct),
@@ -95,8 +102,8 @@ public sealed class CheckEvidenceService
     }
 
     private async Task<EventEvidence> TopQueriesAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, string orderBy, string note,
-        CancellationToken ct)
+        Microsoft.Data.SqlClient.SqlConnection conn, string orderBy, string metric,
+        string note, CancellationToken ct)
     {
         // orderBy çağıranın kendi sabit listesinden geliyor, kullanıcıdan
         // değil - yine de string birleştirme yaptığımız için burada
@@ -111,6 +118,7 @@ public sealed class CheckEvidenceService
         {
             Kind = EventEvidence.KindQueries,
             Queries = rows,
+            Metric = metric,
             Note = note
         };
     }
