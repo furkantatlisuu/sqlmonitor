@@ -128,6 +128,42 @@ public static class LiveEndpoints
         });
 
         // -------------------------------------------------------------
+        // "Bu uyarı neden çıktı?" - sağlık kartına tıklanınca.
+        //
+        // Yukarıdaki olay ucuyla KARIŞTIRILMAMALI: orası geçmiş bir
+        // olayın kaydedilmiş fotoğrafı, burası şu anki durumun canlı
+        // sorgusu. Kart canlı bir şeyi gösteriyor, cevabı da canlı
+        // olmalı - 3 saat önceki kanıtı göstermek yanlış olurdu.
+        // -------------------------------------------------------------
+        api.MapGet("/live/check/{key}/evidence", async (
+            string key,
+            string? instance,
+            CheckEvidenceService evidenceService,
+            InstanceRegistry registry,
+            ProdCredentialStore credStore,
+            CancellationToken ct) =>
+        {
+            var target = registry.Find(instance);
+            if (target is null) return Results.NotFound(new { error = "Tanımlı instance bulunamadı." });
+            if (LoginRequired(target, credStore)) return LoginRequiredResult(target);
+
+            if (!CheckEvidenceService.Supports(key))
+                return Results.NotFound(new { error = $"'{key}' kontrolü için sorgu düzeyinde kanıt yok." });
+
+            try
+            {
+                return Results.Ok(await evidenceService.GetAsync(target, key, ct));
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(
+                    title: "Kanıt okunamadı",
+                    detail: ex.Message,
+                    statusCode: 502);
+            }
+        });
+
+        // -------------------------------------------------------------
         // Tek bir oturumun sorgu metni ve planı.
         //
         // AYRI UÇ OLMASI KASITLI: plan XML'i çekmek pahalıdır. Toplu

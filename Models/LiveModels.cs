@@ -306,6 +306,13 @@ public sealed class HealthCheck
     public string? Remedy { get; set; }
 
     /// <summary>
+    /// Bu kart tıklanınca "neden" sorusuna sorgu düzeyinde cevap
+    /// verilebilir mi (bkz. CheckEvidenceService). Ekran bunu kullanarak
+    /// kartı tıklanabilir yapıyor.
+    /// </summary>
+    public bool CanExplain { get; set; }
+
+    /// <summary>
     /// "Neye bakarak böyle dedin?" - bulgunun dayandığı somut satırlar,
     /// olayın yaşandığı andan. mon.HealthEvent.Evidence'a yazılır, sonra
     /// kullanıcı zaman çizelgesinde olaya tıklayınca geri okunur.
@@ -328,6 +335,7 @@ public sealed class EventEvidence
 {
     public const string KindRequests = "requests";
     public const string KindBlocking = "blocking";
+    public const string KindQueries  = "queries";
 
     public string Kind { get; set; } = "";
 
@@ -336,6 +344,35 @@ public sealed class EventEvidence
 
     /// <summary>Kind = "blocking" ise dolu.</summary>
     public List<BlockEvidenceRow>? Blocks { get; set; }
+
+    /// <summary>Kind = "queries" ise dolu.</summary>
+    public List<QueryEvidenceRow>? Queries { get; set; }
+
+    /// <summary>
+    /// Kullanıcıya "bu listede ne görüyorsun" diye bir cümle. Özellikle
+    /// plan cache sayıları için ŞART: rakamlar birikimli, "şu an" değil.
+    /// Bunu yazmadan liste yanıltıcı olur.
+    /// </summary>
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// Plan cache'ten bir sorgu - "bu uyarıya hangi sorgu sebep oldu"
+/// sorusunun cevabı. Sayılar plan cache'e girildiğinden beri BİRİKİMLİ;
+/// LastExecution ile birlikte okunmalı.
+/// </summary>
+public sealed class QueryEvidenceRow
+{
+    public string DatabaseName { get; set; } = "";
+    public string ObjectName { get; set; } = "";
+    public string SqlText { get; set; } = "";
+    public long Calls { get; set; }
+    public long TotalLogicalReads { get; set; }
+    public long AvgLogicalReads { get; set; }
+    public long TotalPhysicalReads { get; set; }
+    public decimal TotalCpuMs { get; set; }
+    public decimal AvgCpuMs { get; set; }
+    public DateTime LastExecution { get; set; }
 }
 
 /// <summary>

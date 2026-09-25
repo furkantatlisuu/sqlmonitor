@@ -273,6 +273,7 @@ edilemez; panel boş kalır, sunucu rahat kalır.
 | `GET /api/live/snapshot?instance=X` | Ekranın tamamı, tek JSON |
 | `GET /api/live/timeline?instance=X&hours=24` | Durum değişikliği olayları |
 | `GET /api/live/event/{id}/detail?instance=X` | Olay anının kanıtı: uzun süren sorgularda hangi prosedür takıldı, bloklamada kim kimi bekletiyordu |
+| `GET /api/live/check/{key}/evidence?instance=X` | "Bu uyarı neden çıktı" — sağlık kartına tıklanınca, canlı (memory/cpu/long_running/blocking) |
 | `GET /api/live/session/{spid}/plan?instance=X` | Tek sorgunun metni ve planı |
 | `POST /api/live/kill-session` | Bir oturumu sonlandırır (`{instance, sessionId}`) |
 | `GET /api/live/missing-indexes?instance=X` | Eksik index önerileri |

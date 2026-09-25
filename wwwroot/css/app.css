@@ -625,6 +625,46 @@ main { padding: var(--gap); }
 .check-remedy { grid-column: 1 / -1; color: var(--ink-muted); font-size: 12px;
                 margin-top: 5px; padding: 7px 10px;
                 background: var(--inset); border-radius: var(--radius-sm); }
+/* --- "neden?" - kanıtı olan sağlıksız kartlar ------------------- */
+
+.check-clickable { cursor: pointer; }
+
+/* Açılan kart iki sütunun ikisini birden kaplar. Tek sütunda kalsaydı
+   SQL metinleri avuç içi kadar bir alana sıkışır, yanındaki sütun da
+   metrelerce boş kalırdı. */
+.checks .check.is-open { grid-column: 1 / -1; }
+
+.check-why {
+    flex: none; padding: 1px 7px; border-radius: 10px;
+    border: 1px solid currentColor;
+    font-size: 10px; font-weight: 600; letter-spacing: .02em;
+    opacity: .75;
+}
+.check-clickable:hover .check-why,
+.check.is-open .check-why { opacity: 1; }
+.check.is-open .check-why::after { content: " ▾"; }
+.check.sev-warning  .check-why { color: var(--warn); }
+.check.sev-critical .check-why { color: var(--critical); }
+
+/* Kanıt kartın TAM genişliğini kullanmalı. Bunun işe yaraması için
+   panelin .check grid'inin DOĞRUDAN çocuğu olması şart - soru/bulgu
+   sarmalayıcısının içine konsaydı 1fr sütununa sıkışır, sağdaki puan
+   sütununun altı boş kalırdı. */
+.check-evidence { grid-column: 1 / -1; margin-top: 8px; cursor: auto; }
+
+/* Bu panel bir tanı listesi, okuma metni değil: her sorgunun metni
+   kendi içinde kayar ki 5 sorgu sayfayı metrelerce uzatmasın. */
+.check-evidence .tl-ev-sql { max-height: 130px; }
+
+/* Listenin ne anlama geldiği. Plan cache sayıları birikimli; bunu
+   yazmadan liste yanıltıcı olur - o yüzden göz ardı edilemeyecek
+   kadar belirgin, ama sorguların önüne geçmeyecek kadar sakin. */
+.check-ev-note {
+    color: var(--ink-muted); font-size: 11.5px; line-height: 1.5;
+    margin-bottom: 8px; padding: 7px 10px;
+    background: var(--inset); border-radius: var(--radius-sm);
+}
+
 .check-impact { font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--ink-faint); }
 .check.sev-critical .check-impact { color: var(--critical); }
 .check.sev-warning  .check-impact { color: var(--warn); }

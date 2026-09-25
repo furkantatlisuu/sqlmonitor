@@ -32,6 +32,12 @@ const state = {
     // değişmediği için bir kez çekilip tutuluyor (bkz. showEventDetail).
     eventEvidence: {},
 
+    // Sağlık kartı "neden?" cevabı: kontrol anahtarı -> kanıt. Olay
+    // kanıtının aksine bu CANLI - her tıklamada yeniden sorulur, burada
+    // yalnızca saniyelik yeniden çizim sırasında panel boşalmasın diye
+    // duruyor (bkz. showCheckDetail).
+    checkEvidence: {},
+
     // Index Analizi bilerek 1 saniyelik döngünün dışında - eksik index önerileri dakikalar
     // içinde önemli ölçüde değişmez, saniyelik tazelik gerekmiyor.
     miLoaded: false,
@@ -1323,19 +1329,117 @@ function sevIcon(severity) {
 
 function renderChecks(health) {
     const checks = health.checks || [];
+
+    // Açık olan "neden?" panelleri, kart yeniden çizilince kapanmasın
+    // (snapshot saniyede bir geliyor - kapanan panel okunamazdı).
+    const open = new Set(
+        Array.from($('checks').querySelectorAll('.check.is-open'))
+             .map(li => li.dataset.check));
+
     $('checks').innerHTML = checks.map(c => `
-        <li class="check ${sevClass(c.severity)}">
+        <li class="check ${sevClass(c.severity)}${c.canExplain ? ' check-clickable' : ''}"
+            ${c.canExplain ? `data-check="${esc(c.key)}"` : ''}>
             <div>
                 <div class="check-head">
                     ${sevIcon(c.severity)}
                     <p class="check-question">${esc(c.question)}</p>
+                    ${c.canExplain ? '<span class="check-why">neden?</span>' : ''}
                 </div>
                 <p class="check-finding">${esc(c.finding)}</p>
                 ${c.remedy ? `<p class="check-remedy">${esc(c.remedy)}</p>` : ''}
             </div>
             <p class="check-impact">${c.scoreImpact < 0 ? c.scoreImpact + ' puan' : sevLabel(c.severity)}</p>
+            ${c.canExplain ? '<div class="check-evidence" hidden></div>' : ''}
         </li>
     `).join('');
+
+    $('checks').querySelectorAll('.check-clickable').forEach(li => {
+        li.addEventListener('click', () => toggleCheckDetail(li));
+        li.querySelector('.check-evidence')
+          ?.addEventListener('click', (ev) => ev.stopPropagation());
+        if (open.has(li.dataset.check)) showCheckDetail(li, false);
+    });
+}
+
+function toggleCheckDetail(li) {
+    const box = li.querySelector('.check-evidence');
+    if (!box) return;
+
+    if (!box.hidden) {
+        box.hidden = true;
+        li.classList.remove('is-open');
+        return;
+    }
+    showCheckDetail(li, true);
+}
+
+/** Olay kanıtından FARKLI olarak burada önbellek YOK ve olmamalı: kart
+    canlı bir durumu gösteriyor, "neden" cevabı da o anki plan cache'ten
+    geliyor. Beş dakika önceki listeyi göstermek yanlış olurdu.
+    Kart yeniden çizildiğinde (saniyede bir) sunucuya gidilmesin diye
+    sadece TIKLAMA yeniden sorguluyor; yeniden çizim son cevabı koruyor. */
+async function showCheckDetail(li, refetch) {
+    const box = li.querySelector('.check-evidence');
+    const key = li.dataset.check;
+
+    box.hidden = false;
+    li.classList.add('is-open');
+
+    if (!refetch && state.checkEvidence[key]) {
+        renderCheckEvidence(box, state.checkEvidence[key]);
+        return;
+    }
+
+    box.innerHTML = '<p class="tl-ev-note">Bakılıyor…</p>';
+    try {
+        const url = `/api/live/check/${encodeURIComponent(key)}/evidence?instance=` +
+                    encodeURIComponent(state.instance || '');
+        const evidence = await getJson(url);
+        state.checkEvidence[key] = evidence;
+        renderCheckEvidence(box, evidence);
+    } catch (err) {
+        box.innerHTML = `<p class="tl-ev-note is-error">Alınamadı: ${esc(err.message)}</p>`;
+    }
+}
+
+function renderCheckEvidence(box, evidence) {
+    const not = evidence && evidence.note
+        ? `<p class="check-ev-note">${esc(evidence.note)}</p>` : '';
+
+    if (evidence && evidence.kind === 'queries') {
+        const rows = evidence.queries || [];
+        box.innerHTML = not + (rows.length
+            ? rows.map(queryEvidenceHtml).join('')
+            : '<p class="tl-ev-note">Bu pencerede çalışmış sorgu bulunamadı.</p>');
+        return;
+    }
+
+    // requests / blocking - zaman çizelgesiyle aynı çizim
+    const tmp = document.createElement('div');
+    renderEventEvidence(tmp, evidence);
+    box.innerHTML = not + tmp.innerHTML;
+}
+
+function queryEvidenceHtml(q) {
+    const meta = [
+        q.databaseName && `veritabanı: ${q.databaseName}`,
+        `${num(q.calls, 0)} çağrı`,
+        `son çalışma: ${dayTime(q.lastExecution)}`
+    ].filter(Boolean).map(esc).join(' · ');
+
+    return `
+        <div class="tl-ev">
+            <p class="tl-ev-head">
+                ${evObjHtml(q.objectName)}
+                <span class="tl-ev-dur">${esc(pagesToSize(q.totalLogicalReads))} okuma</span>
+                <span class="tl-ev-spid">çağrı başına ${esc(pagesToMB(q.avgLogicalReads))}</span>
+            </p>
+            <p class="tl-ev-meta">${meta}</p>
+            <p class="tl-ev-meta">${esc(
+                `diskten okuma ${pagesToSize(q.totalPhysicalReads)} · ` +
+                `CPU toplam ${duration(q.totalCpuMs)}, çağrı başına ${ms1(q.avgCpuMs)}`)}</p>
+            ${evSqlHtml(q.sqlText)}
+        </div>`;
 }
 
 /** Ortak ölçüm bloğu: isim, sayı, çubuk. */
@@ -2645,6 +2749,7 @@ function wireEvents() {
         state.instance = e.target.value;
         state.lastTimelineAt = 0;   // instance degisti, cizelge hemen tazelensin
         state.eventEvidence = {};   // EventId global; eski sunucunun kanitini tasima
+        state.checkEvidence = {};   // kontrol anahtarlari ortak; eski sunucunun cevabi kalmasin
 
         // Bu sekmeler "bir kez yükle, tekrar isteme" mantığıyla çalışıyor
         // (bkz. loadMissingIndexes ve benzerleri) - instance değişmeden

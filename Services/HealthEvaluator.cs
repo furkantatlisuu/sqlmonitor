@@ -87,7 +87,7 @@ public sealed class HealthEvaluator
             // çözüldüğü anda bu bilgi DMV'den kaybolur.
             Evidence = s.Blocking.Severity == Severity.Healthy
                 ? null
-                : TakeBlockingEvidence(s.Blocking.Chains)
+                : BuildBlockingEvidence(s.Blocking.Chains)
         });
 
         // --- CPU ------------------------------------------------------
@@ -833,6 +833,13 @@ public sealed class HealthEvaluator
                 Severity.Warning => -WarningPenalty,
                 _ => 0
             };
+
+            // Ekran, kartın tıklanabilir görünüp görünmeyeceğine buna
+            // bakarak karar veriyor. Yalnızca sağlıksız kartlarda: sağlıklı
+            // bir kartta açıklanacak bir şey yok, her karta "neden?" rozeti
+            // koymak da paneli gürültüye boğardı.
+            c.CanExplain = c.Severity is Severity.Warning or Severity.Critical
+                        && CheckEvidenceService.Supports(c.Key);
         }
 
         int ScoreFor(string category)
@@ -897,7 +904,13 @@ public sealed class HealthEvaluator
     /// "kaç oturumu bekletiyor"a göre sıralasaydık panel kullanıcıyı
     /// yanlış oturuma yönlendirirdi.
     /// </summary>
-    private static EventEvidence TakeBlockingEvidence(IEnumerable<BlockRow> chains)
+    /// <remarks>
+    /// public: aynı gruplama/sıralama mantığını CheckEvidenceService de
+    /// kullanıyor (sağlık kartına tıklanınca, canlı veriyle). İki yerde
+    /// iki ayrı kopya olsaydı "zincirin tepesi önce" kuralı birinde
+    /// düzeltilip diğerinde unutulurdu.
+    /// </remarks>
+    public static EventEvidence BuildBlockingEvidence(IEnumerable<BlockRow> chains)
     {
         var rows = chains as ICollection<BlockRow> ?? chains.ToList();
         var blocked = rows.Select(b => b.BlockedSessionId).ToHashSet();

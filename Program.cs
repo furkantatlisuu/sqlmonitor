@@ -152,6 +152,7 @@ builder.Services.AddSingleton<CounterDeltaTracker>();
 builder.Services.AddSingleton<StreakTracker>();
 builder.Services.AddSingleton<BackupHistoryReader>();
 builder.Services.AddSingleton<IndexAnalysisService>();
+builder.Services.AddSingleton<CheckEvidenceService>();
 builder.Services.AddSingleton<StoredProcedureService>();
 builder.Services.AddSingleton<AlwaysOnService>();
 builder.Services.AddSingleton<AgentJobService>();

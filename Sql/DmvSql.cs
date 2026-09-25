@@ -1008,6 +1008,55 @@ public static class DmvSql
     /// gibi bu da C# tarafında SABİT bir whitelist'ten geliyor (yalnızca
     /// "ASC"/"DESC" string'i), istekten doğrudan gelmiyor.
     /// </summary>
+    /// <summary>
+    /// "Bu uyarının sebebi hangi sorgu?" - bir sağlık kontrolü kırmızı
+    /// yandığında kullanıcının tıklayıp göreceği kanıt.
+    ///
+    /// dm_exec_procedure_stats DEĞİL, dm_exec_query_stats: PLE'yi düşüren
+    /// ya da CPU'yu yiyen şey çoğu zaman bir prosedür değil, Entity
+    /// Framework'ün ürettiği ad-hoc bir sorgudur (bu sunucuda
+    /// PersistedGrants sorguları tam olarak böyle). Prosedür istatistikleri
+    /// onları hiç göstermez.
+    ///
+    /// SON ÇALIŞMA ZAMANINA GÖRE FİLTRELİ olması şart: sayaçlar plan
+    /// cache'e girdiğinden beri BİRİKİMLİDİR. Filtresiz sorgulasaydık üç
+    /// gündür cache'te duran, bugün hiç çalışmamış bir sorgu listenin
+    /// başında oturur ve kullanıcıyı yanlış yere bakmaya iterdi.
+    ///
+    /// Sıralama sütunu dışarıdan geliyor ({ORDER_BY}) ama KULLANICIDAN
+    /// DEĞİL - çağıran yerdeki sabit listeden (bkz. QueryEvidenceService).
+    /// Gerçek PROD'da (176 milyon çağrılık plan cache) 31 ms sürüyor.
+    /// </summary>
+    public const string TopQueriesTemplate = """
+        SELECT TOP (@Top)
+            DatabaseName       = ISNULL(DB_NAME(t.dbid), N''),
+            ObjectName         = ISNULL(OBJECT_SCHEMA_NAME(t.objectid, t.dbid) + N'.' +
+                                        OBJECT_NAME(t.objectid, t.dbid), N''),
+            Calls              = qs.execution_count,
+            TotalLogicalReads  = qs.total_logical_reads,
+            AvgLogicalReads    = qs.total_logical_reads / qs.execution_count,
+            TotalPhysicalReads = qs.total_physical_reads,
+            TotalCpuMs         = qs.total_worker_time / 1000.0,
+            AvgCpuMs           = (qs.total_worker_time / qs.execution_count) / 1000.0,
+            LastExecution      = qs.last_execution_time,
+
+            /*  Çalışan tek ifade - ActiveRequests ile aynı hesap. Bir
+                prosedürün 400 satırlık gövdesini değil, pahalı olan
+                SELECT'i görmek istiyoruz. */
+            SqlText            = CONVERT(nvarchar(2000), LTRIM(SUBSTRING(t.text,
+                                   (qs.statement_start_offset / 2) + 1,
+                                   ((CASE qs.statement_end_offset
+                                         WHEN -1 THEN DATALENGTH(t.text)
+                                         ELSE qs.statement_end_offset
+                                     END - qs.statement_start_offset) / 2) + 1)))
+        FROM sys.dm_exec_query_stats AS qs WITH (NOLOCK)
+        OUTER APPLY sys.dm_exec_sql_text(qs.sql_handle) AS t
+        WHERE qs.execution_count > 0
+          AND qs.last_execution_time > DATEADD(MINUTE, -@Minutes, GETDATE())
+        ORDER BY {ORDER_BY} DESC
+        OPTION (RECOMPILE);
+        """;
+
     public const string TopProceduresTemplate = """
         SELECT TOP (@Top)
             SqlHandle        = CONVERT(varchar(300), ps.sql_handle, 1),
