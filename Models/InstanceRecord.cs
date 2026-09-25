@@ -13,6 +13,23 @@ public sealed class InstanceRecord
     public string InstanceKey { get; set; } = "";
     public string? DisplayName { get; set; }
     public string Server { get; set; } = "";
+
+    /// <summary>
+    /// "mssql" ya da "postgres" (bkz. DbEngine). Boş/bilinmeyen değer
+    /// SQL Server sayılır - bu alan eklenmeden önce yazılmış satırların
+    /// hepsi SQL Server'dı.
+    /// </summary>
+    public string Engine { get; set; } = DbEngine.SqlServer;
+
+    /// <summary>
+    /// SQL Server'da HER ZAMAN "master" (bağlantı oradan kurulur, DMV'ler
+    /// sunucu geneli okur) - o yüzden formda gösterilmiyor.
+    ///
+    /// PostgreSQL'de ise ZORUNLU ve anlamlı: pg_stat_user_tables,
+    /// pg_stat_user_indexes, pg_sequences ve pg_stat_statements
+    /// VERİTABANI BAŞINADIR, bağlanılan veritabanının dışını göremezler.
+    /// Bu yüzden PostgreSQL seçilince alan formda geri geliyor.
+    /// </summary>
     public string DatabaseName { get; set; } = "master";
 
     /// <summary>RequiresLogin=true ise NULL - appsettings.json'daki Prod kuralıyla aynı disiplin.</summary>
@@ -54,6 +71,7 @@ public sealed record InstanceSummary(
     string InstanceKey,
     string? DisplayName,
     string Server,
+    string Engine,
     string DatabaseName,
     string? UserId,
     bool HasPassword,

@@ -28,12 +28,15 @@ public sealed class LiveMonitorService
     private readonly MonitorOptions _options;
     private readonly ILogger<LiveMonitorService> _log;
 
+    private readonly PostgresMonitorService _postgres;
+
     public LiveMonitorService(
         SqlConnectionFactory factory,
         CounterDeltaTracker counters,
         StreakTracker streaks,
         MetricStore store,
         HealthEvaluator health,
+        PostgresMonitorService postgres,
         IOptions<MonitorOptions> options,
         ILogger<LiveMonitorService> log)
     {
@@ -42,6 +45,7 @@ public sealed class LiveMonitorService
         _streaks = streaks;
         _store = store;
         _health = health;
+        _postgres = postgres;
         _options = options.Value;
         _log = log;
     }
@@ -53,6 +57,14 @@ public sealed class LiveMonitorService
     public async Task<LiveSnapshot> GetSnapshotAsync(
         InstanceOptions instance, CancellationToken ct, string scope = "ui")
     {
+        // PostgreSQL tamamen ayrı bir servise gidiyor. Bu metodun
+        // içine "if postgres" serpiştirmek, 700 satırlık SQL Server
+        // mantığını iki motorun ortak paydasına indirgemeye çalışmak
+        // olurdu - ikisi aynı şeyleri ölçmüyor (bkz.
+        // PostgresMonitorService). Çağıran taraf farkı bilmiyor.
+        if (DbEngine.IsPostgres(instance.Engine))
+            return await _postgres.GetSnapshotAsync(instance, ct);
+
         var sw = Stopwatch.StartNew();
         var snapshot = new LiveSnapshot
         {

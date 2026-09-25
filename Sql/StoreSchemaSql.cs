@@ -196,6 +196,13 @@ public static class StoreSchemaSql
             ALTER TABLE mon.MonitoredInstance ADD SlackAlertsEnabled BIT NOT NULL CONSTRAINT DF_MonitoredInstance_SlackAlerts DEFAULT (0);
         GO
 
+        -- İzlenen sunucunun motoru: 'mssql' ya da 'postgres'.
+        -- Varsayılan 'mssql' ve bu KASITLI: bu kolon eklenmeden önce
+        -- yazılmış her satır bir SQL Server'dı, hepsi doğru değeri alsın.
+        IF COL_LENGTH(N'mon.MonitoredInstance', N'Engine') IS NULL
+            ALTER TABLE mon.MonitoredInstance ADD Engine VARCHAR(16) NOT NULL CONSTRAINT DF_MonitoredInstance_Engine DEFAULT ('mssql');
+        GO
+
         -- RequiresLogin=true bir instance'a ekrandan girilen kimlik bilgisi
         -- BAŞARILI olduktan sonra burada hatırlanır - kullanıcı "her F5'te/
         -- yeniden başlatmada yeniden gir" istemedi. mon.MonitoredInstance'taki

@@ -1,5 +1,8 @@
+using System.Data.Common;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
+using Npgsql;
+using SqlMonitor.Models;
 using SqlMonitor.Options;
 using SqlMonitor.Services;
 
@@ -72,6 +75,72 @@ public sealed class SqlConnectionFactory
     }
 
     public int QueryTimeoutSeconds => _options.QueryTimeoutSeconds;
+
+    /// <summary>
+    /// Motor bağımsız hedef bağlantısı. Dapper IDbConnection üzerinden
+    /// çalıştığı için çağıran tarafın hangi sürücü olduğunu bilmesi
+    /// gerekmiyor - yalnızca hangi SORGU setini kullanacağını bilmesi
+    /// gerekiyor, o da sağlayıcının işi (bkz. IMonitorProvider).
+    ///
+    /// SQL Server yolu CreateTargetConnection'a düşüyor; oradaki
+    /// ApplicationName/timeout/kimlik disiplini aynen geçerli.
+    /// </summary>
+    public DbConnection CreateTargetDbConnection(InstanceOptions instance)
+        => DbEngine.IsPostgres(instance.Engine)
+            ? CreatePostgresConnection(instance)
+            : CreateTargetConnection(instance);
+
+    /// <summary>
+    /// PostgreSQL hedefi.
+    ///
+    /// RequiresLogin disiplini SQL Server'dakiyle AYNI: bağlantı dizesi
+    /// kimlik taşımıyorsa ProdCredentialStore'dan taze okunur, kilit
+    /// açılmamışsa ProdLoginRequiredException fırlar. Npgsql'in kendi
+    /// builder'ı kullanılıyor çünkü SqlConnectionStringBuilder
+    /// PostgreSQL dizesini ayrıştıramaz.
+    /// </summary>
+    private NpgsqlConnection CreatePostgresConnection(InstanceOptions instance)
+    {
+        if (string.IsNullOrWhiteSpace(instance.ConnectionString))
+            throw new InvalidOperationException($"'{instance.Name}' instance'ının bağlantı dizesi boş.");
+
+        var builder = new NpgsqlConnectionStringBuilder(instance.ConnectionString)
+        {
+            Timeout = Math.Min(new NpgsqlConnectionStringBuilder(instance.ConnectionString).Timeout, 5),
+            ApplicationName = "SqlMonitor.Live"
+        };
+
+        if (instance.RequiresLogin)
+        {
+            if (!_credentials.TryGet(instance.Name, out var userId, out var password))
+                throw new ProdLoginRequiredException(instance.Name);
+
+            builder.Username = userId;
+            builder.Password = password;
+        }
+
+        return new NpgsqlConnection(builder.ConnectionString);
+    }
+
+    /// <summary>
+    /// Giriş doğrulaması - PostgreSQL sürümü. SQL Server'daki
+    /// VerifyCredentialsAsync ile aynı ilke: hüküm sunucunun, burada
+    /// hiçbir şifre karşılaştırılmıyor.
+    /// </summary>
+    public async Task VerifyPostgresCredentialsAsync(
+        InstanceOptions instance, string userId, string password, CancellationToken ct)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(instance.ConnectionString)
+        {
+            Username = userId,
+            Password = password,
+            Timeout = 5,
+            ApplicationName = "SqlMonitor.Live"
+        };
+
+        await using var conn = new NpgsqlConnection(builder.ConnectionString);
+        await conn.OpenAsync(ct);
+    }
 
     /// <summary>
     /// Yedek geçmişi okunacak diğer replika.

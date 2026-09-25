@@ -634,6 +634,28 @@ function toggleImCredFields() {
     $('imCredFields').hidden = $('imRequiresLogin').checked;
 }
 
+/** Motor değişince forma girmesi anlamlı olan alanlar değişiyor. */
+function toggleImEngineFields() {
+    const pg = $('imEngine').value === 'postgres';
+
+    // PostgreSQL'de veritabanı ZORUNLU: pg_stat_user_tables,
+    // pg_sequences ve pg_stat_statements yalnızca bağlanılan
+    // veritabanını görür. SQL Server'da hep master.
+    $('imDatabaseField').hidden = !pg;
+
+    // Always On'a dair her şey SQL Server'a özgü.
+    $('imAutoDiscoverField').hidden = pg;
+    $('imReplicaField').hidden = pg;
+
+    $('imServerHint').textContent = pg
+        ? '(port farklıysa 10.0.0.5:5433 biçiminde yazılabilir)'
+        : '';
+
+    // PostgreSQL'de Windows kimlik doğrulaması yok - kullanıcı adı hep
+    // gerekli. Boş bırakılabileceğini söyleyen ipucu orada yanlış olurdu.
+    $('imUserId').placeholder = pg ? 'postgres' : 'boş = Windows kimlik doğrulaması';
+}
+
 /** item=null → yeni sunucu formu; item verilirse o kaydı düzenleme formu. */
 function openInstanceForm(item) {
     state.imEditingKey = item ? item.instanceKey : null;
@@ -646,12 +668,16 @@ function openInstanceForm(item) {
     $('imKey').disabled = !!item;   // anahtar oluşturulduktan sonra değiştirilemez, bkz. InstanceManagementEndpoints üstündeki not
     $('imDisplayName').value = (item && item.displayName) || '';
     $('imServer').value = (item && item.server) || '';
-    // Veritabanı alanı formdan KALDIRILDI: bağlantı yalnızca "bir yere
-    // bağlanmak" için açılıyor, okunan her şey sunucu geneli DMV -
-    // master dışında bir şey seçmenin pratikte faydası yoktu, sorusu
-    // ise her yeni sunucuda tekrar tekrar karşımıza çıkıyordu.
-    // Sunucu tarafı boş gelen değeri zaten "master" yapıyor
-    // (bkz. Api/InstanceManagementEndpoints.cs).
+    $('imEngine').value = (item && item.engine) || 'mssql';
+
+    // Veritabanı alanı SQL Server'da GİZLİ: orada bağlantı her zaman
+    // master üzerinden kurulur ve DMV'ler sunucunun tamamını görür -
+    // seçmenin faydası yoktu, sorusu her yeni sunucuda tekrar
+    // karşımıza çıkıyordu. PostgreSQL'de ise gerçekten gerekli
+    // (bkz. toggleImEngineFields).
+    $('imDatabase').value = (item && item.databaseName && item.databaseName !== 'master')
+        ? item.databaseName : '';
+
     $('imRequiresLogin').checked = !!(item && item.requiresLogin);
     $('imUserId').value = (item && item.userId) || '';
     $('imPassword').value = '';
@@ -663,7 +689,8 @@ function openInstanceForm(item) {
     $('imError').hidden = true;
 
     toggleImCredFields();
-    $('instMgrForm').hidden = false;
+    toggleImEngineFields();
+    $("instMgrForm").hidden = false;
     $('imKey').focus();
 }
 
@@ -748,8 +775,11 @@ async function handleInstanceFormSubmit(e) {
 
     const body = {
         displayName: $('imDisplayName').value.trim(),
-        server: $('imServer').value.trim(),
-        databaseName: '',            // sunucu tarafı "master" yapıyor
+        server: $("imServer").value.trim(),
+        engine: $("imEngine").value,
+        // SQL Server: bos gider, sunucu tarafi "master" yapar.
+        // PostgreSQL: kullanicinin yazdigi veritabani, bos ise "postgres".
+        databaseName: $("imEngine").value === "postgres" ? $("imDatabase").value.trim() : "",
         userId: $('imUserId').value.trim(),
         password: $('imPassword').value,
         requiresLogin: $('imRequiresLogin').checked,
@@ -932,17 +962,52 @@ function showErrors(errors) {
 // ------------------------------------------------------------------
 
 function render(s) {
+    applyCapabilities(s);
+
     renderVerdict(s);
     renderTrendWindow(s.trend);
     renderKpis(s.kpis);
     renderChecks(s.health);
-    renderCpu(s.cpu);
-    renderMemory(s.memory);
-    renderTempDb(s.tempDb);
-    renderDisk(s.disk);
-    renderWaits(s.waits);
     renderBlocking(s.blocking);
     renderRequests(s.activity);
+
+    // Motorun ölçmediği paneller hiç çizilmiyor - gizli bir kartı
+    // doldurmak boşa iş, üstelik PostgreSQL'de o veriler snapshot'ta
+    // hiç yok (cpu/memory/tempDb varsayılan boş nesne olarak gelir ve
+    // çizilirse "0" gösterip yalan söylerdi).
+    if (hasCap(s, 'cpu'))     renderCpu(s.cpu);
+    if (hasCap(s, 'memory'))  renderMemory(s.memory);
+    if (hasCap(s, 'tempdb'))  renderTempDb(s.tempDb);
+    if (hasCap(s, 'disk'))    renderDisk(s.disk);
+    if (hasCap(s, 'waits'))   renderWaits(s.waits);
+}
+
+function hasCap(s, key) {
+    return !s.capabilities || s.capabilities.indexOf(key) !== -1;
+}
+
+/** Motorun ölçemediği kart ve sekmeleri tamamen gizler (kullanıcı
+    tercihi: "hiç görünmesin"). Gizlenen bir sekme seçiliyse Genel
+    Bakış'a dönüyoruz - yoksa kullanıcı boş bir ekrana bakakalırdı. */
+function applyCapabilities(s) {
+    const caps = s.capabilities;
+    if (!caps) return;
+
+    document.querySelectorAll('[data-cap]').forEach(el => {
+        el.hidden = caps.indexOf(el.dataset.cap) === -1;
+    });
+
+    // Gizlenen bir sekme seçiliyse Genel Bakış'a dön - yoksa kullanıcı
+    // artık görünmeyen bir sekmenin boş panelinde kalakalırdı.
+    const aktif = document.querySelector('.tab.is-active');
+    if (aktif && aktif.hidden) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('is-active'));
+        document.querySelectorAll('.tabpanel').forEach(p => p.classList.remove('is-active'));
+        document.querySelector('.tab[data-tab="overview"]').classList.add('is-active');
+        document.querySelector('[data-panel="overview"]').classList.add('is-active');
+    }
+
+    document.body.dataset.engine = s.engine || 'mssql';
 }
 
 function renderVerdict(s) {
@@ -965,11 +1030,21 @@ function renderVerdict(s) {
         critical > 0 ? `<span class="tag is-critical">${critical} kritik</span>` : '',
         warning  > 0 ? `<span class="tag is-warning">${warning} uyarı</span>` : '',
         healthy  > 0 ? `<span class="tag is-healthy">${healthy} sağlıklı</span>` : '',
-        `<span class="tag">${esc(s.server.edition || '')}</span>`,
-        `<span class="tag">${s.server.cpuCount} çekirdek · ${s.server.schedulerCount} scheduler</span>`,
-        `<span class="tag">${num(s.server.physicalMemoryGb, 0)} GB RAM</span>`,
-        `<span class="tag">${num(s.server.uptimeHours, 0)} saat açık</span>`,
-        `<span class="tag">${s.server.onlineDatabaseCount}/${s.server.databaseCount} DB online</span>`
+        `<span class="tag">${esc(s.server.edition || '')}${
+            s.server.productVersion ? ' ' + esc(s.server.productVersion) : ''}</span>`,
+
+        // Donanım etiketleri yalnızca DOLU olduklarında çiziliyor.
+        // PostgreSQL kendi çekirdek/RAM sayısını bilmez; "0 çekirdek ·
+        // 0 GB RAM" yazmak bilgi değil, yanlış bilgi olurdu - kartları
+        // gizleme kararının aynısı burada da geçerli.
+        s.server.cpuCount > 0
+            ? `<span class="tag">${s.server.cpuCount} çekirdek · ${s.server.schedulerCount} scheduler</span>` : '',
+        s.server.physicalMemoryGb > 0
+            ? `<span class="tag">${num(s.server.physicalMemoryGb, 0)} GB RAM</span>` : '',
+        s.server.uptimeHours > 0
+            ? `<span class="tag">${num(s.server.uptimeHours, 0)} saat açık</span>` : '',
+        s.server.databaseCount > 0
+            ? `<span class="tag">${s.server.onlineDatabaseCount}/${s.server.databaseCount} DB online</span>` : ''
     ].join('');
 
     // Skor halkasi: dasharray ile dolan cember.
@@ -1642,7 +1717,7 @@ function renderBlocking(b) {
     }
 
     const head = b.headBlockerSessionId
-        ? `<p class="blocking-head-note">Baş engelleyici: <b>SPID ${b.headBlockerSessionId}</b> —
+        ? `<p class="blocking-head-note">Baş engelleyici: <b>${spidLabel()} ${b.headBlockerSessionId}</b> —
            zinciri çözmek için önce buna bak.
            <button type="button" class="btn-kill" data-kill="${b.headBlockerSessionId}">Sonlandır</button></p>`
         : '';
@@ -1651,7 +1726,7 @@ function renderBlocking(b) {
         <tr>
             <td class="num">${c.blockedSessionId}</td>
             <td class="num">${c.blockingSessionId}<button type="button" class="btn-kill-inline"
-                data-kill="${c.blockingSessionId}" title="SPID ${c.blockingSessionId}'i sonlandır">✕</button></td>
+                data-kill="${c.blockingSessionId}" title="${spidLabel()} ${c.blockingSessionId} sonlandır">✕</button></td>
             <td>${esc(c.databaseName)}</td>
             <td>${esc(c.waitType)}</td>
             <td class="num">${duration(c.waitTimeMs)}</td>
@@ -1681,7 +1756,7 @@ function renderBlocking(b) {
  */
 async function handleKillSession(sessionId) {
     if (!window.confirm(
-        `SPID ${sessionId} sonlandırılsın mı?\n\n` +
+        `${spidLabel()} ${sessionId} sonlandırılsın mı?\n\n` +
         `Bu işlem geri alınamaz - o oturumdaki kaydedilmemiş her şey rollback edilir.`
     )) return;
 
@@ -1832,6 +1907,13 @@ function renderEventEvidence(box, evidence) {
 
 /** Ad-hoc bir sorguda prosedür adı yoktur; "" yerine ne olduğunu
     söylemek, boş bir başlıktan iyidir. */
+/** PostgreSQL oturum numarasina PID der, SQL Server SPID. Ekranin
+    motorun kendi dilini konusmasi, kullanicinin dokumantasyonla
+    eslestirmesini kolaylastiriyor. */
+function spidLabel() {
+    return document.body.dataset.engine === "postgres" ? "PID" : "SPID";
+}
+
 function evObjHtml(objectName) {
     return objectName
         ? `<span class="tl-ev-obj">${esc(objectName)}</span>`
@@ -1851,7 +1933,7 @@ function requestEvidenceHtml(r) {
         r.hostName && `makine: ${r.hostName}`,
         r.programName && `uygulama: ${r.programName}`,
         r.waitType && `bekleme: ${r.waitType}`,
-        r.blockedBy > 0 && `SPID ${r.blockedBy} tarafından bloklanmış`
+        r.blockedBy > 0 && `${spidLabel()} ${r.blockedBy} tarafından bloklanmış`
     ].filter(Boolean).map(esc).join(' · ');
 
     return `
@@ -1859,7 +1941,7 @@ function requestEvidenceHtml(r) {
             <p class="tl-ev-head">
                 ${evObjHtml(r.objectName)}
                 <span class="tl-ev-dur">${duration(r.elapsedSeconds * 1000)}</span>
-                <span class="tl-ev-spid">SPID ${r.sessionId}</span>
+                <span class="tl-ev-spid">${spidLabel()} ${r.sessionId}</span>
             </p>
             <p class="tl-ev-meta">${meta}</p>
             ${evSqlHtml(r.sqlText)}
@@ -1895,7 +1977,7 @@ function blockEvidenceHtml(b) {
             <p class="tl-ev-head">
                 <span class="tl-ev-role is-blocker">bekleten</span>
                 ${evObjHtml(b.blockerObjectName)}
-                <span class="tl-ev-spid">SPID ${b.blockingSessionId}</span>
+                <span class="tl-ev-spid">${spidLabel()} ${b.blockingSessionId}</span>
                 ${bas}
                 ${kac}
             </p>
@@ -1905,7 +1987,7 @@ function blockEvidenceHtml(b) {
                 <span class="tl-ev-role is-blocked">bekleyen${esc(ornek)}</span>
                 ${evObjHtml(b.blockedObjectName)}
                 <span class="tl-ev-dur">${duration(b.waitSeconds * 1000)} bekledi</span>
-                <span class="tl-ev-spid">SPID ${b.blockedSessionId}</span>
+                <span class="tl-ev-spid">${spidLabel()} ${b.blockedSessionId}</span>
             </p>
             <p class="tl-ev-meta">${meta}</p>
             ${evSqlHtml(b.blockedSql)}
@@ -2679,7 +2761,7 @@ function openDrawerShell(title) {
 }
 
 async function openDrawer(sessionId) {
-    openDrawerShell('SPID ' + sessionId);
+    openDrawerShell(spidLabel() + " " + sessionId);
 
     try {
         const url = `/api/live/session/${sessionId}/plan?instance=` +
@@ -2815,6 +2897,7 @@ function wireEvents() {
     $('imCancel').addEventListener('click', closeInstanceForm);
     $('instMgrForm').addEventListener('submit', handleInstanceFormSubmit);
     $('imRequiresLogin').addEventListener('change', toggleImCredFields);
+    $('imEngine').addEventListener('change', toggleImEngineFields);
 
     $('instMgr').addEventListener('click', (e) => {
         if (e.target.id === 'instMgr') closeInstanceManager();

@@ -35,7 +35,10 @@ public static class InstanceManagementEndpoints
                 InstanceKey = (body.InstanceKey ?? "").Trim(),
                 DisplayName = string.IsNullOrWhiteSpace(body.DisplayName) ? null : body.DisplayName.Trim(),
                 Server = (body.Server ?? "").Trim(),
-                DatabaseName = string.IsNullOrWhiteSpace(body.DatabaseName) ? "master" : body.DatabaseName.Trim(),
+                Engine = DbEngine.Normalize(body.Engine),
+                DatabaseName = string.IsNullOrWhiteSpace(body.DatabaseName)
+                    ? (DbEngine.IsPostgres(body.Engine) ? "postgres" : "master")
+                    : body.DatabaseName.Trim(),
                 UserId = body.UserId,
                 Password = body.Password,
                 RequiresLogin = body.RequiresLogin,
@@ -59,7 +62,10 @@ public static class InstanceManagementEndpoints
                 InstanceKey = key,
                 DisplayName = string.IsNullOrWhiteSpace(body.DisplayName) ? null : body.DisplayName.Trim(),
                 Server = (body.Server ?? "").Trim(),
-                DatabaseName = string.IsNullOrWhiteSpace(body.DatabaseName) ? "master" : body.DatabaseName.Trim(),
+                Engine = DbEngine.Normalize(body.Engine),
+                DatabaseName = string.IsNullOrWhiteSpace(body.DatabaseName)
+                    ? (DbEngine.IsPostgres(body.Engine) ? "postgres" : "master")
+                    : body.DatabaseName.Trim(),
                 UserId = body.UserId,
                 Password = body.Password,
                 RequiresLogin = body.RequiresLogin,
@@ -139,19 +145,19 @@ public static class InstanceManagementEndpoints
     }
 
     private static InstanceSummary ToSummary(InstanceRecord r) => new(
-        r.InstanceKey, r.DisplayName, r.Server, r.DatabaseName, r.UserId,
-        HasPassword: !string.IsNullOrEmpty(r.Password),
+        r.InstanceKey, r.DisplayName, r.Server, DbEngine.Normalize(r.Engine), r.DatabaseName, r.UserId,
+        !string.IsNullOrEmpty(r.Password),
         r.RequiresLogin, r.IsDefault, r.AutoDiscoverAgReplicas, r.ReplicaHostOverrides, r.SlackAlertsEnabled);
 
     private sealed record NewInstanceRequest(
-        string InstanceKey, string? DisplayName, string Server, string? DatabaseName,
+        string InstanceKey, string? DisplayName, string Server, string? Engine, string? DatabaseName,
         string? UserId, string? Password, bool RequiresLogin, bool IsDefault, bool AutoDiscoverAgReplicas,
         string? ReplicaHostOverrides, bool SlackAlertsEnabled);
 
     private sealed record SlackWebhookRequest(string? WebhookUrl);
 
     private sealed record UpdateInstanceRequest(
-        string? DisplayName, string Server, string? DatabaseName,
+        string? DisplayName, string Server, string? Engine, string? DatabaseName,
         string? UserId, string? Password, bool RequiresLogin, bool IsDefault, bool AutoDiscoverAgReplicas,
         string? ReplicaHostOverrides, bool SlackAlertsEnabled);
 }

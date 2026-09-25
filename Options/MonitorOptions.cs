@@ -1,3 +1,5 @@
+using SqlMonitor.Models;
+
 namespace SqlMonitor.Options;
 
 /// <summary>
@@ -79,6 +81,21 @@ public sealed class InstanceOptions
     public string? DisplayName { get; set; }
 
     public string ConnectionString { get; set; } = string.Empty;
+
+    /// <summary>
+    /// "mssql" (varsayılan) ya da "postgres". Bağlantının hangi sürücüyle
+    /// açılacağını ve hangi sorgu setinin kullanılacağını bu belirliyor
+    /// (bkz. DbEngine, MonitorProviderFactory).
+    /// </summary>
+    public string Engine { get; set; } = DbEngine.SqlServer;
+
+    /// <summary>
+    /// PostgreSQL'in max_connections değeri - bağlantı doluluğu
+    /// kontrolünün böleni. Bağlanınca sunucudan okunup dolduruluyor;
+    /// 0 ise PostgreSQL varsayılanı (100) kabul edilir.
+    /// SQL Server'da kullanılmıyor.
+    /// </summary>
+    public int MaxConnections { get; set; }
 
     public bool IsDefault { get; set; }
 

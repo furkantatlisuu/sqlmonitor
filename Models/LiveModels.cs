@@ -22,6 +22,17 @@ public sealed class LiveSnapshot
     public DateTime CapturedAtUtc { get; set; }
     public int ElapsedMs { get; set; }
 
+    /// <summary>"mssql" ya da "postgres" - ekran başlıkta gösteriyor.</summary>
+    public string Engine { get; set; } = DbEngine.SqlServer;
+
+    /// <summary>
+    /// Bu motorun ölçebildikleri (bkz. Capability). Ekran, listede
+    /// OLMAYAN her kartı/sekmeyi tamamen gizliyor - PostgreSQL'de CPU
+    /// ya da yedek kartı göstermenin anlamı yok, o veriler hiç
+    /// üretilmiyor.
+    /// </summary>
+    public List<string> Capabilities { get; set; } = new(Capability.SqlServerAll);
+
     public ServerInfo Server { get; set; } = new();
     public List<KpiItem> Kpis { get; set; } = new();
     public CpuPanel Cpu { get; set; } = new();
@@ -225,6 +236,9 @@ public sealed class WaitTypeDelta
 public sealed class ActivityPanel
 {
     public int RunningRequests { get; set; }
+
+    /// <summary>PostgreSQL max_connections. SQL Server tarafinda 0 kalir.</summary>
+    public int MaxConnections { get; set; }
     public int SleepingSessions { get; set; }
     public int TotalConnections { get; set; }
     public int OpenTransactions { get; set; }

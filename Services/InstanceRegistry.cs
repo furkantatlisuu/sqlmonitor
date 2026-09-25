@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using SqlMonitor.Infrastructure;
 using SqlMonitor.Models;
 using SqlMonitor.Options;
@@ -152,7 +153,7 @@ public sealed class InstanceRegistry
     private async Task ReloadCoreAsync(SqlConnection conn, CancellationToken ct)
     {
         const string sql = """
-            SELECT InstanceKey, DisplayName, Server, DatabaseName, UserId, Password,
+            SELECT InstanceKey, DisplayName, Server, Engine, DatabaseName, UserId, Password,
                    RequiresLogin, IsDefault, AutoDiscoverAgReplicas, SortOrder, ReplicaHostOverrides,
                    SlackAlertsEnabled
             FROM mon.MonitoredInstance
@@ -169,6 +170,9 @@ public sealed class InstanceRegistry
     private static InstanceOptions ToInstanceOptions(InstanceRecord r)
     {
         var replicaHosts = ParseReplicaHosts(r.ReplicaHostOverrides);
+
+        if (DbEngine.IsPostgres(r.Engine))
+            return ToPostgresOptions(r);
 
         var builder = new SqlConnectionStringBuilder
         {
@@ -210,8 +214,78 @@ public sealed class InstanceRegistry
             AutoDiscoverAgReplicas = r.AutoDiscoverAgReplicas,
             ReplicaHostOverrides = replicaHosts.Map,
             ReplicaAddresses = replicaHosts.Addresses,
-            SlackAlertsEnabled = r.SlackAlertsEnabled
+            SlackAlertsEnabled = r.SlackAlertsEnabled,
+            Engine = DbEngine.SqlServer
         };
+    }
+
+    /// <summary>
+    /// PostgreSQL bağlantı dizesi. SQL Server'dan üç farkı var:
+    ///
+    /// 1) Veritabanı adı ZORUNLU ve anlamlı. pg_stat_user_tables,
+    ///    pg_sequences, pg_stat_statements gibi görünümler VERİTABANI
+    ///    BAŞINADIR; yanlış veritabanına bağlanmak "hiç tablo yok"
+    ///    demekle sonuçlanır. Boş bırakılırsa 'postgres' varsayılıyor.
+    /// 2) Windows kimlik doğrulaması yok - kullanıcı adı hep gerekir.
+    /// 3) Port adresin içinde gelebilir ("10.0.0.5:5433"); SQL Server
+    ///    virgül kullanırken PostgreSQL dünyasında iki nokta yazılır,
+    ///    kullanıcı hangisini yazarsa yazsın ikisini de kabul ediyoruz.
+    ///
+    /// AG ile ilgili alanlar (replika adresleri, otomatik keşif) burada
+    /// BİLEREK boş: kullanıcının PostgreSQL kurulumu tek makine.
+    /// </summary>
+    private static InstanceOptions ToPostgresOptions(InstanceRecord r)
+    {
+        var (host, port) = SplitHostPort(r.Server);
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Database = string.IsNullOrWhiteSpace(r.DatabaseName) || r.DatabaseName == "master"
+                ? "postgres"
+                : r.DatabaseName,
+
+            // İzlenen sunucuyu bekletmemek SQL Server tarafındaki
+            // disiplinin aynısı (bkz. SqlConnectionFactory).
+            Timeout = 5,
+            ApplicationName = "SqlMonitor.Live",
+
+            // Havuzu küçük tutuyoruz: izleme aracı izlediği sunucuda
+            // onlarca bağlantı açmamalı.
+            MaxPoolSize = 4
+        };
+
+        if (port.HasValue) builder.Port = port.Value;
+
+        if (!r.RequiresLogin && !string.IsNullOrWhiteSpace(r.UserId))
+        {
+            builder.Username = r.UserId;
+            builder.Password = r.Password ?? "";
+        }
+
+        return new InstanceOptions
+        {
+            Name = r.InstanceKey,
+            DisplayName = r.DisplayName,
+            ConnectionString = builder.ConnectionString,
+            IsDefault = r.IsDefault,
+            RequiresLogin = r.RequiresLogin,
+            AutoDiscoverAgReplicas = false,
+            SlackAlertsEnabled = r.SlackAlertsEnabled,
+            Engine = DbEngine.Postgres
+        };
+    }
+
+    /// <summary>"host", "host:5433" ve "host,5433" - üçü de kabul.</summary>
+    private static (string Host, int? Port) SplitHostPort(string server)
+    {
+        var s = (server ?? "").Trim();
+        var i = s.LastIndexOfAny(new[] { ':', ',' });
+
+        if (i > 0 && int.TryParse(s[(i + 1)..], out var p) && p is > 0 and <= 65535)
+            return (s[..i], p);
+
+        return (s, null);
     }
 
     /// <summary>
@@ -317,6 +391,7 @@ public sealed class InstanceRegistry
                 WHEN MATCHED THEN UPDATE SET
                     DisplayName  = @DisplayName,
                     Server       = @Server,
+                    Engine       = @Engine,
                     DatabaseName = @Database,
                     UserId       = @UserId,
                     Password     = CASE WHEN @PasswordProvided = 1 THEN @Password ELSE target.Password END,
@@ -326,8 +401,8 @@ public sealed class InstanceRegistry
                     ReplicaHostOverrides = @ReplicaHostOverrides,
                     SlackAlertsEnabled = @SlackAlertsEnabled
                 WHEN NOT MATCHED THEN INSERT
-                    (InstanceKey, DisplayName, Server, DatabaseName, UserId, Password, RequiresLogin, IsDefault, AutoDiscoverAgReplicas, ReplicaHostOverrides, SlackAlertsEnabled)
-                    VALUES (@Key, @DisplayName, @Server, @Database, @UserId, @Password, @RequiresLogin, @IsDefault, @AutoDiscover, @ReplicaHostOverrides, @SlackAlertsEnabled);
+                    (InstanceKey, DisplayName, Server, Engine, DatabaseName, UserId, Password, RequiresLogin, IsDefault, AutoDiscoverAgReplicas, ReplicaHostOverrides, SlackAlertsEnabled)
+                    VALUES (@Key, @DisplayName, @Server, @Engine, @Database, @UserId, @Password, @RequiresLogin, @IsDefault, @AutoDiscover, @ReplicaHostOverrides, @SlackAlertsEnabled);
                 """;
 
             await conn.ExecuteAsync(new CommandDefinition(upsert, new
@@ -335,7 +410,14 @@ public sealed class InstanceRegistry
                 Key = r.InstanceKey,
                 r.DisplayName,
                 r.Server,
-                Database = string.IsNullOrWhiteSpace(r.DatabaseName) ? "master" : r.DatabaseName,
+                Engine = DbEngine.Normalize(r.Engine),
+
+                // PostgreSQL'de veritabanı adı gerçekten gerekli
+                // (görünümler veritabanı başına), SQL Server'da ise hep
+                // master. Boş gelirse motora göre doğru varsayılan.
+                Database = string.IsNullOrWhiteSpace(r.DatabaseName)
+                    ? (DbEngine.IsPostgres(r.Engine) ? "postgres" : "master")
+                    : r.DatabaseName,
                 UserId = userId,
                 Password = password,
                 PasswordProvided = passwordProvided,
@@ -406,6 +488,7 @@ public sealed class InstanceRegistry
     /// </summary>
     private static bool CredentialsAffectedBy(InstanceRecord before, InstanceRecord after, bool passwordProvided)
         => !string.Equals(before.Server, after.Server, StringComparison.OrdinalIgnoreCase)
+        || !string.Equals(DbEngine.Normalize(before.Engine), DbEngine.Normalize(after.Engine), StringComparison.OrdinalIgnoreCase)
         || !string.Equals(before.DatabaseName, after.DatabaseName, StringComparison.OrdinalIgnoreCase)
         || !string.Equals(before.UserId ?? "", after.UserId ?? "", StringComparison.OrdinalIgnoreCase)
         || before.RequiresLogin != after.RequiresLogin

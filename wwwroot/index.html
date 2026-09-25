@@ -127,10 +127,10 @@
 <nav class="tabs" role="tablist">
     <button class="tab is-active" role="tab" data-tab="overview">Genel bakış</button>
     <button class="tab" role="tab" data-tab="activity">Aktivite</button>
-    <button class="tab" role="tab" data-tab="storedproc">Stored Procedure</button>
-    <button class="tab" role="tab" data-tab="indexanalysis">Index Analizi</button>
-    <button class="tab" role="tab" data-tab="alwayson">Always On</button>
-    <button class="tab" role="tab" data-tab="agentjobs">Agent Jobs</button>
+    <button class="tab" role="tab" data-tab="storedproc" data-cap="topqueries">Stored Procedure</button>
+    <button class="tab" role="tab" data-tab="indexanalysis" data-cap="missingindexes">Index Analizi</button>
+    <button class="tab" role="tab" data-tab="alwayson" data-cap="alwayson">Always On</button>
+    <button class="tab" role="tab" data-tab="agentjobs" data-cap="agentjobs">Agent Jobs</button>
 </nav>
 
 <p class="errors" id="errors" hidden></p>
@@ -138,7 +138,7 @@
 <main>
     <!-- ---------------------------------------------------------- -->
     <section class="panel-grid tabpanel is-active" data-panel="overview">
-        <article class="card" data-accent="cpu">
+        <article class="card" data-accent="cpu" data-cap="cpu">
             <header class="card-head">
                 <h2>CPU</h2>
                 <span class="badge" id="cpuBadge"></span>
@@ -146,7 +146,7 @@
             <div id="cpuBody"></div>
         </article>
 
-        <article class="card" data-accent="mem">
+        <article class="card" data-accent="mem" data-cap="memory">
             <header class="card-head">
                 <h2>Bellek</h2>
                 <span class="badge" id="memoryBadge"></span>
@@ -154,7 +154,7 @@
             <div id="memoryBody"></div>
         </article>
 
-        <article class="card" data-accent="tempdb">
+        <article class="card" data-accent="tempdb" data-cap="tempdb">
             <header class="card-head">
                 <h2>tempdb</h2>
                 <span class="badge" id="tempdbBadge"></span>
@@ -162,7 +162,7 @@
             <div id="tempdbBody"></div>
         </article>
 
-        <article class="card" data-accent="disk">
+        <article class="card" data-accent="disk" data-cap="disk">
             <header class="card-head">
                 <h2>Disk</h2>
                 <span class="badge" id="diskBadge"></span>
@@ -190,7 +190,7 @@
              farklı bekleme türü eşiği geçtiyse o kadar satır) - kart
              yüksekliği oynadıkça ÜSTÜNDEKİ her şeyi yukarı/aşağı kaydırırdı.
              Sayfanın en sonunda olduğu için artık kaydıracak bir şey yok. -->
-        <article class="card card-wide" data-accent="wait">
+        <article class="card card-wide" data-accent="wait" data-cap="waits">
             <header class="card-head">
                 <h2>Bekleme</h2>
                 <p class="card-note">gürültü filtrelenmiş, iki örnekleme arası</p>
@@ -600,9 +600,30 @@
                 <span>Görünen ad</span>
                 <input type="text" id="imDisplayName">
             </label>
+            <!-- Motor seçimi formun BAŞINDA: altındaki alanların bir kısmı
+                 (veritabanı, Always On, Windows kimlik doğrulaması) buna göre
+                 görünüp kayboluyor. Sonda olsaydı kullanıcı önce doldurup
+                 sonra alanların değiştiğini görürdü. -->
             <label class="auth-field">
-                <span>Sunucu / IP</span>
+                <span>Veritabanı motoru</span>
+                <select id="imEngine">
+                    <option value="mssql">SQL Server</option>
+                    <option value="postgres">PostgreSQL</option>
+                </select>
+            </label>
+            <label class="auth-field">
+                <span>Sunucu / IP <span class="field-hint" id="imServerHint"></span></span>
                 <input type="text" id="imServer" required>
+            </label>
+
+            <!-- SQL Server'da bağlantı her zaman master üzerinden kurulur ve
+                 DMV'ler sunucunun tamamını görür - o yüzden orada bu alan yok.
+                 PostgreSQL'de pg_stat_user_tables / pg_sequences /
+                 pg_stat_statements VERİTABANI BAŞINADIR: yanlış veritabanına
+                 bağlanmak "hiç tablo yok" demekle sonuçlanır. -->
+            <label class="auth-field" id="imDatabaseField" hidden>
+                <span>Veritabanı <span class="field-hint">(tablo/index/sequence istatistikleri yalnızca bu veritabanı için okunur)</span></span>
+                <input type="text" id="imDatabase" placeholder="postgres">
             </label>
             <label class="im-checkbox">
                 <input type="checkbox" id="imRequiresLogin">
@@ -624,7 +645,7 @@
                 <input type="checkbox" id="imIsDefault">
                 <span>Varsayılan sunucu (uygulama açılınca bu seçili gelsin)</span>
             </label>
-            <label class="im-checkbox">
+            <label class="im-checkbox" id="imAutoDiscoverField">
                 <input type="checkbox" id="imAutoDiscover" checked>
                 <span>Always On replikalarını otomatik keşfet</span>
             </label>
@@ -633,7 +654,7 @@
                  (bkz. Services/InstanceRegistry.cs ParseReplicaHosts) - çoğu
                  kurulumda boş bırakılabilir. Düz IP listesi yeterli: hangi
                  adresin hangi sunucu olduğunu uygulama bağlanınca öğreniyor. -->
-            <label class="auth-field">
+            <label class="auth-field" id="imReplicaField">
                 <span>Diğer replikaların adresleri <span class="field-hint">(isteğe bağlı — yalnızca AG varsa ve sunucu adları DNS'te çözülmüyorsa)</span></span>
                 <input type="text" id="imReplicaOverrides" placeholder="ör. 10.0.0.16;10.0.0.17">
             </label>

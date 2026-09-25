@@ -92,6 +92,45 @@ Kullanıcı adını **boş bırakırsan Windows kimlik doğrulaması** kullanıl
 yerel/etki alanı içindeki bir sunucuyu ayrı bir SQL hesabı açmadan
 izlemek için yeterli.
 
+### 4. PostgreSQL sunucusu ekleme
+
+"Sunucuları yönet" → "Yeni sunucu" → **Veritabanı motoru: PostgreSQL**.
+
+İki alan SQL Server'dakinden farklı davranır:
+
+- **Sunucu / IP** — port varsayılan değilse `10.0.0.5:5433` biçiminde yazılır.
+- **Veritabanı** — PostgreSQL'de **zorunlu.** `pg_stat_user_tables`,
+  `pg_sequences` ve `pg_stat_statements` yalnızca bağlanılan veritabanını
+  görür; yanlış veritabanı seçilirse tablo/index/sequence istatistikleri
+  boş gelir. SQL Server'da bu alan yok (bağlantı hep `master`, DMV'ler
+  sunucunun tamamını okur).
+
+Windows kimlik doğrulaması PostgreSQL'de yoktur - kullanıcı adı hep gerekir.
+Always On alanları PostgreSQL seçilince gizlenir.
+
+**PostgreSQL'de ölçülemeyenler.** Ekran, karşılığı olmayan kartları ve
+sekmeleri tamamen gizler - boş kart göstermek yerine. Gizlenenler:
+
+| Gizlenen | Sebep |
+|---|---|
+| CPU | PostgreSQL kendi CPU kullanımını hiç ölçmez |
+| Bellek / PLE | "page life expectancy" diye bir kavram yok; yerine önbellek isabet oranı kontrolü var |
+| Disk | Sunucunun disklerini göremez (superuser + eklenti gerekir) |
+| tempdb | Ayrı bir tempdb yok; yerine geçici dosya kontrolü var |
+| Bekleme | Birikimli bekleme sayacı yok, yalnızca anlık `wait_event` |
+| Yedekler | msdb gibi bir yedek katalogu yok |
+| Always On / Agent Jobs | Karşılığı yok |
+| Index Analizi | PostgreSQL eksik index ÖNERİSİ üretmez |
+| Stored Procedure | `pg_stat_statements` eklentisi gerekir |
+
+**`pg_stat_statements`** kuruluysa "En Yoğun Sorgular" da açılır. Kurulu
+değilse (varsayılan) o bölüm hiç görünmez. Kurmak için
+`postgresql.conf`'ta `shared_preload_libraries = 'pg_stat_statements'`
+ayarlanıp sunucu yeniden başlatılmalı, sonra `CREATE EXTENSION pg_stat_statements;`.
+
+**PostgreSQL'e özel kontroller** (SQL Server'da karşılığı olmayanlar):
+bağlantı limiti doluluğu, ölü satır / vacuum yetişiyor mu, replikasyon
+slotu ve WAL arşivi, geçici dosya taşması.
 ### 4. Slack bildirimi (isteğe bağlı)
 
 Webhook adresi **hiçbir dosyaya yazılmaz.** Uygulamayı aç, sağ üstten

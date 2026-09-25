@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Microsoft.Extensions.Options;
 using SqlMonitor.Infrastructure;
@@ -64,8 +65,22 @@ public sealed class CheckEvidenceService
     public async Task<EventEvidence?> GetAsync(
         InstanceOptions instance, string checkKey, CancellationToken ct)
     {
-        await using var conn = _factory.CreateTargetConnection(instance);
+        await using var conn = _factory.CreateTargetDbConnection(instance);
         await conn.OpenAsync(ct);
+
+        // PostgreSQL'in kendi sorguları. Kanıt üretebildiği iki kontrol
+        // var: bloklama ve uzun süren sorgu - ikisinin de cevabı canlı
+        // oturumlarda. "memory"/"cpu" burada YOK, çünkü PostgreSQL o
+        // kontrolleri hiç üretmiyor (bkz. PostgresMonitorService).
+        if (DbEngine.IsPostgres(instance.Engine))
+        {
+            return checkKey.ToLowerInvariant() switch
+            {
+                "long_running" => await PgRunningRequestsAsync(conn, ct),
+                "blocking"     => await PgBlockingAsync(conn, ct),
+                _ => null
+            };
+        }
 
         return checkKey.ToLowerInvariant() switch
         {
@@ -102,7 +117,7 @@ public sealed class CheckEvidenceService
     }
 
     private async Task<EventEvidence> TopQueriesAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, string orderBy, string metric,
+        DbConnection conn, string orderBy, string metric,
         string note, CancellationToken ct)
     {
         // orderBy çağıranın kendi sabit listesinden geliyor, kullanıcıdan
@@ -123,8 +138,34 @@ public sealed class CheckEvidenceService
         };
     }
 
+    private async Task<EventEvidence> PgRunningRequestsAsync(DbConnection conn, CancellationToken ct)
+    {
+        var rows = (await conn.QueryAsync<RequestRow>(new CommandDefinition(
+            PgSql.ActiveRequests, commandTimeout: _options.QueryTimeoutSeconds,
+            cancellationToken: ct))).ToList();
+
+        // Yalnızca GERÇEKTEN çalışanlar: pg_stat_activity idle bir
+        // bağlantıda son sorgunun query_start'ını tutmaya devam eder,
+        // onları da katsaydık saatlerdir "çalışıyor" görünürlerdi.
+        var evidence = HealthEvaluator.BuildRequestEvidence(
+            rows.Where(r => r.Status == "active"));
+        evidence.Note = "Şu anda çalışan istekler, en uzun sürenden kısaya.";
+        return evidence;
+    }
+
+    private async Task<EventEvidence> PgBlockingAsync(DbConnection conn, CancellationToken ct)
+    {
+        var rows = (await conn.QueryAsync<BlockRow>(new CommandDefinition(
+            PgSql.BlockingChains, commandTimeout: _options.QueryTimeoutSeconds,
+            cancellationToken: ct))).ToList();
+
+        var evidence = HealthEvaluator.BuildBlockingEvidence(rows);
+        evidence.Note = "Şu anda süren bloklama, zincirin tepesinden aşağıya.";
+        return evidence;
+    }
+
     private async Task<EventEvidence> RunningRequestsAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, CancellationToken ct)
+        DbConnection conn, CancellationToken ct)
     {
         var rows = (await conn.QueryAsync<RequestRow>(new CommandDefinition(
             DmvSql.ActiveRequests, commandTimeout: _options.QueryTimeoutSeconds,
@@ -158,7 +199,7 @@ public sealed class CheckEvidenceService
     }
 
     private async Task<EventEvidence> BlockingAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, CancellationToken ct)
+        DbConnection conn, CancellationToken ct)
     {
         var rows = (await conn.QueryAsync<BlockRow>(new CommandDefinition(
             DmvSql.BlockingChains, commandTimeout: _options.QueryTimeoutSeconds,

@@ -947,6 +947,15 @@ public sealed class HealthEvaluator
         };
     }
 
+    /// <remarks>
+    /// public: PostgresMonitorService de aynı kırpma/sıralama
+    /// kurallarını kullanıyor. Kanıt sınırları (5 satır, kırpılmış SQL)
+    /// motor bağımsızdır - iki kopya tutmak, birinde düzeltilen sınırın
+    /// diğerinde unutulması demekti.
+    /// </remarks>
+    public static EventEvidence BuildRequestEvidence(IEnumerable<RequestRow> requests)
+        => TakeEvidence(requests);
+
     private static EventEvidence TakeEvidence(IEnumerable<RequestRow> requests)
         => new()
         {
