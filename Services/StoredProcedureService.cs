@@ -41,6 +41,30 @@ public sealed class StoredProcedureService
         ["lastexecution"] = "ps.last_execution_time"
     };
 
+    /// <summary>
+    /// Aynı sıralama anahtarlarının PostgreSQL karşılığı. Ekran her iki
+    /// motorda da aynı sütun başlıklarını gösteriyor, arkadaki ifade
+    /// değişiyor.
+    ///
+    /// PostgreSQL'de "süre" ve "CPU" AYNI sütundur (total_exec_time):
+    /// motor sorgu başına CPU'yu ayrı ölçmez, yalnızca geçen süreyi
+    /// tutar. İkisini farklıymış gibi göstermek yanlış olurdu; ikisi de
+    /// aynı gerçeği gösteriyor.
+    /// </summary>
+    private static readonly Dictionary<string, string> PgSortExpressions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["cpu"]           = "s.total_exec_time",
+        ["avgcpu"]        = "(s.total_exec_time / greatest(s.calls, 1))",
+        ["avgduration"]   = "(s.total_exec_time / greatest(s.calls, 1))",
+        ["duration"]      = "s.total_exec_time",
+        ["calls"]         = "s.calls",
+        ["reads"]         = "(s.shared_blks_hit + s.shared_blks_read)",
+        ["writes"]        = "s.shared_blks_written",
+        ["avgreads"]      = "((s.shared_blks_hit + s.shared_blks_read) / greatest(s.calls, 1))",
+        ["avgwrites"]     = "(s.shared_blks_written / greatest(s.calls, 1))",
+        ["lastexecution"] = "s.total_exec_time"   // PostgreSQL son çalışma zamanını tutmaz
+    };
+
     public static bool IsValidSortKey(string? key) => key is not null && SortExpressions.ContainsKey(key);
 
     public StoredProcedureService(SqlConnectionFactory factory, IOptions<MonitorOptions> options)
@@ -52,10 +76,13 @@ public sealed class StoredProcedureService
     public async Task<TopProceduresResult> GetTopProceduresAsync(
         InstanceOptions instance, string sortKey, bool descending, int top, CancellationToken ct)
     {
+        top = Math.Clamp(top, 1, 200);
+
+        if (DbEngine.IsPostgres(instance.Engine))
+            return await GetPostgresTopAsync(instance, sortKey, descending, top, ct);
+
         if (!SortExpressions.TryGetValue(sortKey, out var orderBy))
             throw new ArgumentException($"Geçersiz sıralama anahtarı: {sortKey}");
-
-        top = Math.Clamp(top, 1, 200);
 
         var sql = DmvSql.TopProceduresTemplate
                    .Replace("{ORDER_BY}", orderBy)
@@ -72,6 +99,63 @@ public sealed class StoredProcedureService
 
         var rows = (await multi.ReadAsync<TopProcedureRow>()).ToList();
         var totals = await multi.ReadSingleAsync<TotalsRow>();
+
+        var listedCpu = rows.Sum(r => r.TotalCpuMs);
+        var listedDuration = rows.Sum(r => r.TotalDurationMs);
+
+        foreach (var r in rows)
+            r.DurationSharePercent = listedDuration > 0
+                ? Math.Round(r.TotalDurationMs * 100m / listedDuration, 1)
+                : 0;
+
+        return new TopProceduresResult
+        {
+            SortKey = sortKey,
+            SortDescending = descending,
+            CachedProcCount = totals.ProcCount,
+            TotalCallsAllCache = totals.TotalCalls,
+            TotalCpuMsAllCache = totals.TotalCpuMs,
+            TotalDurationMsAllCache = totals.TotalDurationMs,
+            ListedTotalCpuMs = listedCpu,
+            ListedTotalDurationMs = listedDuration,
+            Rows = rows
+        };
+    }
+
+    /// <summary>
+    /// PostgreSQL'in "en yoğun sorgular"ı - pg_stat_statements'tan.
+    ///
+    /// Sonuç SQL Server'la AYNI şekilde dönüyor ki ekran tarafında
+    /// ikinci bir tablo yazmak gerekmesin. İki gerçek fark var ve
+    /// ikisi de uydurulmuyor, olduğu gibi aktarılıyor:
+    ///
+    /// - CPU ve süre aynı sayı (bkz. PgSortExpressions): PostgreSQL
+    ///   sorgu başına CPU'yu ayrı ölçmez.
+    /// - "Son çalışma" bilgisi yok; pg_stat_statements böyle bir sütun
+    ///   tutmuyor. Ekranda o sütun boş kalır.
+    /// </summary>
+    private async Task<TopProceduresResult> GetPostgresTopAsync(
+        InstanceOptions instance, string sortKey, bool descending, int top, CancellationToken ct)
+    {
+        if (!PgSortExpressions.TryGetValue(sortKey, out var orderBy))
+            throw new ArgumentException($"Geçersiz sıralama anahtarı: {sortKey}");
+
+        var sql = PgSql.TopStatementsTemplate
+                   .Replace("{ORDER_BY}", orderBy)
+                   .Replace("{DIRECTION}", descending ? "DESC" : "ASC");
+
+        await using var conn = _factory.CreateTargetDbConnection(instance);
+        await conn.OpenAsync(ct);
+
+        var rows = (await conn.QueryAsync<TopProcedureRow>(new CommandDefinition(
+            sql, new { Top = top },
+            commandTimeout: Math.Max(_options.QueryTimeoutSeconds, 15),
+            cancellationToken: ct))).ToList();
+
+        var totals = await conn.QuerySingleAsync<TotalsRow>(new CommandDefinition(
+            PgSql.StatementTotals,
+            commandTimeout: Math.Max(_options.QueryTimeoutSeconds, 15),
+            cancellationToken: ct));
 
         var listedCpu = rows.Sum(r => r.TotalCpuMs);
         var listedDuration = rows.Sum(r => r.TotalDurationMs);

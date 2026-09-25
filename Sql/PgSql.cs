@@ -138,15 +138,23 @@ public static class PgSql
             d.temp_files                                AS "TempFiles",
             d.temp_bytes                                AS "TempBytes",
             coalesce(d.checksum_failures, 0)            AS "ChecksumFailures",
-            pg_database_size(d.datname)                 AS "SizeBytes",
             d.stats_reset                               AS "StatsReset",
             db.datallowconn                             AS "AllowConnections"
         FROM pg_stat_database d
         JOIN pg_database db ON db.datname = d.datname
         WHERE d.datname IS NOT NULL
           AND db.datistemplate = false
-        ORDER BY pg_database_size(d.datname) DESC;
+        ORDER BY d.datname;
         """;
+        /*  pg_database_size() BİLEREK YOK.
+            Buradaydı ve pahalıydı: veritabanı dizinini dolaşıyor, bu
+            sorguyu çağrı başına ~394 ms'ye çıkarıyordu - kendi
+            pg_stat_statements listemizde izlenen sunucunun EN AĞIR
+            sorgusu olarak çıktı (toplam sürenin %84'ü). Hem SELECT'te
+            hem ORDER BY'da, yani veritabanı başına iki kez
+            çağrılıyordu. Döndürdüğü değer ise hiçbir kontrolde
+            kullanılmıyordu. "İzlediğin sunucuyu boşuna yorma" ilkesi
+            en çok izleme aracının kendisi için geçerli. */
 
     /// <summary>
     /// Sequence doluluğu - SQL Server'daki IDENTITY taşma kontrolünün
@@ -274,6 +282,62 @@ public static class PgSql
     /// shared_blks_*); daha eskisinde total_time idi. Kullanıcının
     /// sunucusu 18.
     /// </summary>
+    /// <summary>
+    /// "En Yoğun Sorgular" listesi - dm_exec_procedure_stats'in
+    /// karşılığı, ama PROSEDÜR değil SORGU bazında.
+    ///
+    /// PostgreSQL'de prosedür/fonksiyon istatistiği ayrı bir yerdedir
+    /// (pg_stat_user_functions) ve varsayılan olarak KAPALIDIR
+    /// (track_functions = none). Kullanıcının sunucusunda da kapalı.
+    /// pg_stat_statements ise her SQL ifadesini tutar - "hangi sorgu
+    /// ağır" sorusunun burada gerçek cevabı budur.
+    ///
+    /// ProcName sütununa sorgunun ilk satırını koyuyoruz: ekran bir ad
+    /// bekliyor, PostgreSQL'de sorgunun adı yok. Uydurma bir ad
+    /// üretmektense sorgunun kendisinden okunabilir bir parça veriyoruz.
+    ///
+    /// queryid metin olarak SqlHandle'a konuyor - "İncele" düğmesi tam
+    /// metni onunla geri istiyor.
+    /// </summary>
+    public const string TopStatementsTemplate = """
+        SELECT
+            s.queryid::text                             AS "SqlHandle",
+            ''                                          AS "PlanHandle",
+            coalesce(d.datname, current_database())     AS "DatabaseName",
+            ''                                          AS "SchemaName",
+            left(regexp_replace(s.query, '\s+', ' ', 'g'), 120) AS "ProcName",
+            s.calls                                     AS "Calls",
+            s.total_exec_time::numeric                  AS "TotalCpuMs",
+            s.total_exec_time::numeric                  AS "TotalDurationMs",
+            (s.shared_blks_hit + s.shared_blks_read)::bigint AS "LogicalReads",
+            s.shared_blks_written::bigint               AS "LogicalWrites",
+            now()                                       AS "CachedTime",
+            now()                                       AS "LastExecutionTime"
+        FROM pg_stat_statements s
+        LEFT JOIN pg_database d ON d.oid = s.dbid
+        WHERE s.calls > 0
+        ORDER BY {ORDER_BY} {DIRECTION}
+        LIMIT @Top;
+        """;
+
+    /// <summary>Listenin altındaki "tüm cache" özeti.</summary>
+    public const string StatementTotals = """
+        SELECT
+            count(*)::int                               AS "ProcCount",
+            coalesce(sum(calls), 0)::bigint             AS "TotalCalls",
+            coalesce(sum(total_exec_time), 0)::numeric  AS "TotalCpuMs",
+            coalesce(sum(total_exec_time), 0)::numeric  AS "TotalDurationMs"
+        FROM pg_stat_statements;
+        """;
+
+    /// <summary>"İncele" - queryid'ye göre sorgunun tam metni.</summary>
+    public const string StatementTextByQueryId = """
+        SELECT left(query, 100000)
+        FROM pg_stat_statements
+        WHERE queryid::text = @QueryId
+        LIMIT 1;
+        """;
+
     public const string TopQueriesTemplate = """
         SELECT
             current_database()                          AS "DatabaseName",

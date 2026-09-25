@@ -576,7 +576,6 @@ public sealed class PostgresMonitorService
         public long TempFiles { get; set; }
         public long TempBytes { get; set; }
         public long ChecksumFailures { get; set; }
-        public long SizeBytes { get; set; }
         public DateTime? StatsReset { get; set; }
         public bool AllowConnections { get; set; }
     }
