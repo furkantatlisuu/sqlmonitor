@@ -23,6 +23,7 @@ public sealed class LiveMonitorService
     private readonly SqlConnectionFactory _factory;
     private readonly CounterDeltaTracker _counters;
     private readonly StreakTracker _streaks;
+    private readonly PleTrendTracker _pleTrend;
     private readonly MetricStore _store;
     private readonly HealthEvaluator _health;
     private readonly MonitorOptions _options;
@@ -34,6 +35,7 @@ public sealed class LiveMonitorService
         SqlConnectionFactory factory,
         CounterDeltaTracker counters,
         StreakTracker streaks,
+        PleTrendTracker pleTrend,
         MetricStore store,
         HealthEvaluator health,
         PostgresMonitorService postgres,
@@ -43,6 +45,7 @@ public sealed class LiveMonitorService
         _factory = factory;
         _counters = counters;
         _streaks = streaks;
+        _pleTrend = pleTrend;
         _store = store;
         _health = health;
         _postgres = postgres;
@@ -88,7 +91,7 @@ public sealed class LiveMonitorService
             () => ReadCpuAsync(conn, instance.Name, scope, ct)) ?? new CpuPanel();
 
         snapshot.Memory = await SafeAsync(snapshot, "memory",
-            () => ReadMemoryAsync(conn, counters, ct)) ?? new MemoryPanel();
+            () => ReadMemoryAsync(conn, counters, instance.Name, scope, ct)) ?? new MemoryPanel();
 
         snapshot.TempDb = await SafeAsync(snapshot, "tempdb",
             () => ReadTempDbAsync(conn, ct)) ?? new TempDbPanel();
@@ -270,7 +273,8 @@ public sealed class LiveMonitorService
     }
 
     private async Task<MemoryPanel> ReadMemoryAsync(
-        SqlConnection conn, Dictionary<string, long>? counters, CancellationToken ct)
+        SqlConnection conn, Dictionary<string, long>? counters,
+        string instanceName, string scope, CancellationToken ct)
     {
         var mem = await QuerySingleAsync<MemoryRow>(conn, DmvSql.MemoryUsage, ct);
         var t = _options.Thresholds;
@@ -291,6 +295,28 @@ public sealed class LiveMonitorService
         // PLE'de yön ters: düşük olan kötü.
         panel.Severity = Grade(panel.PageLifeExpectancy, t.PleWarn, t.PleCritical, higherIsWorse: false);
 
+        // ... AMA düşük bir PLE tek başına "bellek baskısı" demek DEĞİL.
+        //
+        // PLE bir yaş değil, bir orandır: havuzdan sayfa atılmayı
+        // bıraktığı anda saniyede 1 artmaya başlar. Yani tek seferlik bir
+        // rapor sorgusundan sonra PLE dakikalarca düşük GÖRÜNÜR, oysa
+        // havuzda o sırada hiçbir şey atılmıyordur - sistem sağlamdır.
+        //
+        // Gerçek PROD olayı: bir admin ekranı 2,8 GB okudu, PLE 4121'den
+        // 160'a düştü, sonra 171-202-232-262-291 diye SANİYEDE 1 arttı.
+        // Alarm, sistem çoktan iyileşmişken 5 dakika "KRİTİK" dedi ve
+        // Slack'e gitti. Eşiği yükseltmek ya da "üst üste N tur" demek
+        // bunu çözmez: ikisi de "ne kadar süredir düşük" diye sorar,
+        // doğru soru ise "hâlâ kötüleşiyor mu".
+        panel.IsRecovering = _pleTrend.ObserveAndIsRecovering(
+            scope, instanceName, panel.PageLifeExpectancy, DateTime.UtcNow);
+
+        if (panel.IsRecovering)
+            panel.Severity = Severity.Healthy;
+
+        // Bekleyen bellek talebi (Memory Grants Pending) AYRI bir sinyal
+        // ve toparlamayla örtülmemeli: sorgular bellek bekliyorsa baskı
+        // şu anda vardır, PLE'nin yönü ne olursa olsun.
         if (panel.PendingGrants > 0)
             panel.Severity = Worst(panel.Severity, Severity.Warning);
 

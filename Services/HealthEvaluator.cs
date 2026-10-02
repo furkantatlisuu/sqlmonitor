@@ -58,7 +58,16 @@ public sealed class HealthEvaluator
             Category = Performance,
             Severity = s.Memory.Severity,
             Finding = $"PLE {s.Memory.PageLifeExpectancy} sn, bekleyen grant {s.Memory.PendingGrants}, " +
-                      $"bellek {s.Memory.CommittedGb:0.#}/{s.Memory.TargetGb:0.#} GB",
+                      $"bellek {s.Memory.CommittedGb:0.#}/{s.Memory.TargetGb:0.#} GB" +
+
+                      // PLE düşük ama sağlıklı görünüyorsa SEBEBİNİ yazmak
+                      // şart: yoksa kullanıcı "PLE 160 ve sağlıklı mı?"
+                      // diye haklı olarak araca güvenmeyi bırakır.
+                      (s.Memory.IsRecovering && s.Memory.PageLifeExpectancy < 1000
+                          ? " · PLE saniyede 1 artıyor: havuzdan sayfa atılmıyor, " +
+                            "düşük değer geçmiş bir okumanın kalıntısı"
+                          : ""),
+
             Remedy = s.Memory.Severity == Severity.Healthy
                 ? null
                 : "Max server memory ayarını ve en çok okuma yapan sorguları gözden geçir. " +

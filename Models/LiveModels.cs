@@ -140,6 +140,13 @@ public sealed class CpuPanel
 public sealed class MemoryPanel
 {
     public long PageLifeExpectancy { get; set; }
+
+    /// <summary>
+    /// PLE saniyede ~1 artiyor mu - yani havuzdan sayfa ATILMIYOR mu.
+    /// true ise dusuk PLE gecmis bir olayin kalintisidir, su anki bir
+    /// baski degil (bkz. PleTrendTracker).
+    ///</summary>
+    public bool IsRecovering { get; set; }
     public decimal BufferCacheHitRatio { get; set; }
     public int PendingGrants { get; set; }
     public decimal CommittedGb { get; set; }

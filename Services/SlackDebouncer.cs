@@ -29,10 +29,38 @@ namespace SqlMonitor.Services;
 /// </summary>
 public sealed class SlackDebouncer
 {
-    private const int RequiredCriticalStreak = 2;
+    private const int DefaultCriticalStreak = 2;
+
+    /// <summary>
+    /// Bazı kontroller için 2 tur (~1 dk) YETERSİZ. Bellek bunun örneği:
+    ///
+    /// PLE bir yaş değil, bir orandır. Tek bir ağır rapor sorgusu
+    /// havuzdan birkaç GB geçirdiğinde PLE anında dibe vurur, iş bitince
+    /// de saniyede 1 artarak kendiliğinden geri tırmanır. Gerçek PROD
+    /// olayında PLE 4121'den 160'a düştü, 2 dakika orada kaldı, sonra
+    /// tırmanıp 5. dakikada eşiğin üstüne çıktı. Bu bir arıza değil, bir
+    /// raporun maliyeti - ama 2 turluk eşik Slack'e "KRİTİK" yolladı.
+    ///
+    /// 10 tur (~5 dk) bu ayrımı yapıyor: kendi kendine geçen bir çukur
+    /// sessiz kalır, GERÇEK bellek baskısı (dakikalarca düşük kalan PLE)
+    /// yine bildirilir. Eşiği yükseltmek ya da kontrolü kapatmak yerine
+    /// bunu seçtik - ikisi de gerçek baskıyı da görünmez yapardı.
+    /// </summary>
+    private static readonly Dictionary<string, int> StreakByCheck = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["memory"] = 10
+    };
 
     private readonly ConcurrentDictionary<string, int> _streaks = new();
     private readonly ConcurrentDictionary<string, bool> _alerted = new();
+
+    /// <summary>Anahtar "INSTANCE::kontrol" biçiminde geliyor (bkz. CollectorService).</summary>
+    private static int RequiredStreak(string key)
+    {
+        var i = key.LastIndexOf("::", StringComparison.Ordinal);
+        var check = i >= 0 ? key[(i + 2)..] : key;
+        return StreakByCheck.TryGetValue(check, out var n) ? n : DefaultCriticalStreak;
+    }
 
     public (bool BecameCritical, bool Resolved) Evaluate(string key, Severity current)
     {
@@ -43,7 +71,7 @@ public sealed class SlackDebouncer
         {
             // "==" bilerek ">=" değil: eşik bir kez aşıldıktan sonra streak
             // büyümeye devam ederken her turda tekrar tetiklenmesin diye.
-            if (streak == RequiredCriticalStreak)
+            if (streak == RequiredStreak(key))
             {
                 _alerted[key] = true;
                 return (true, false);

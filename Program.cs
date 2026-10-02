@@ -150,6 +150,7 @@ builder.Services.AddSingleton<InstanceRegistry>();
 // Sayaç farkları uygulama ömrü boyunca hafızada tutulmalı - singleton.
 builder.Services.AddSingleton<CounterDeltaTracker>();
 builder.Services.AddSingleton<StreakTracker>();
+builder.Services.AddSingleton<PleTrendTracker>();
 builder.Services.AddSingleton<BackupHistoryReader>();
 builder.Services.AddSingleton<IndexAnalysisService>();
 builder.Services.AddSingleton<CheckEvidenceService>();
