@@ -1527,8 +1527,13 @@ function queryEvidenceHtml(q, metric) {
                `diskten ${pagesToSize(q.totalPhysicalReads)}`;
     } else {
         // "disk" - varsayılan. RAM/PLE kartının sorduğu şey bu.
-        one  = `${pagesToSize(q.totalPhysicalReads)} diskten`;
-        two  = `çağrı başına ${pagesToMB(q.totalPhysicalReads / calls)}`;
+        //
+        // Öne çıkan sayı ÇAĞRI BAŞINA: liste de ona göre sıralı.
+        // Toplamı başa koymak yanıltıyordu - günde yüz binlerce kez
+        // çalışan ucuz bir prosedürün birikmiş toplamı, havuzu tek
+        // çırpıda boşaltan sorgudan büyük görünüyordu.
+        one  = `${pagesToMB(q.totalPhysicalReads / calls)} diskten / çağrı`;
+        two  = `toplam ${pagesToSize(q.totalPhysicalReads)}`;
         rest = `önbellekten okuma ${pagesToSize(q.totalLogicalReads)} (çağrı başına ${pagesToMB(q.avgLogicalReads)}) · ` +
                `CPU toplam ${duration(q.totalCpuMs)}`;
     }

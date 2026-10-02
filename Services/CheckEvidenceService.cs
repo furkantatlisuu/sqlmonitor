@@ -90,17 +90,33 @@ public sealed class CheckEvidenceService
             // düşürmez - milyarlarca logical read yapan bir sorgu
             // bellek açısından masum olabilir.
             //
-            // Bu sıralama bir kez total_logical_reads'ti ve YANILTTI:
-            // gerçek PROD'da başa 8 TB okuyan ama diskten yalnızca
-            // 104 KB çeken bir kimlik sorgusu çıkıyor, PLE'yi asıl
-            // çökerten 155 milyon satırlık tablo taraması (2 çağrıda
-            // 8,4 GB disk) listede hiç görünmüyordu.
-            "memory" => await TopQueriesAsync(conn, "qs.total_physical_reads", "disk",
-                $"Son {LookbackMinutes} dakikada çalışmış, EN ÇOK DİSKTEN OKUYAN sorgular. " +
-                "PLE'yi düşüren budur: diskten gelen her sayfa, önbellekteki bir sayfanın " +
-                "yerini alır. Önbellekten okuma (ikinci satırdaki sayı) çoktur ama PLE'ye " +
-                "etkisi yoktur. Sayılar sorgu plan cache'e girdiğinden beri birikimlidir, " +
-                "son çalışma zamanıyla birlikte okuyun.", ct),
+            // Sıralama ÇAĞRI BAŞINA, toplama göre değil - iki kez
+            // düzeltildi, ikisi de gerçek PROD olayından öğrenildi:
+            //
+            // 1) Önce total_logical_reads'ti: 8 TB okuyan ama diskten
+            //    yalnızca 104 KB çeken bir kimlik sorgusu başa çıkıyordu.
+            // 2) Sonra total_physical_reads oldu ve YİNE yanılttı. PLE
+            //    4121'den 160'a düştüğünde liste SP_CreatePurchaseInvoice
+            //    gibi prosedürleri "9,31 GB diskten" diye gösterdi - ama
+            //    o 9 GB 142 BİN çağrıda, GÜNLER içinde birikmişti; çağrı
+            //    başına 0,07 MB. Havuzu boşaltan asıl sorgu TEK çağrıda
+            //    2,8 GB okuyan bir admin sayfalama prosedürüydü ve
+            //    toplama göre sıralı listede 8. sıradaydı.
+            //
+            // Plan cache sayaçları plan oluştuğundan beri birikimli;
+            // "son 60 dakika" filtresi yalnızca SON ÇALIŞMA zamanına
+            // bakar, sayaçları o pencereye KISITLAYAMAZ. O yüzden
+            // toplamlar penceresiz, çağrı başına değer ise gerçek:
+            // havuzu bir çırpıda boşaltan şey, tek seferde çok sayfa
+            // okuyan sorgudur.
+            "memory" => await TopQueriesAsync(conn,
+                "(qs.total_physical_reads / qs.execution_count)", "disk",
+                $"Son {LookbackMinutes} dakikada çalışmış, ÇAĞRI BAŞINA en çok diskten " +
+                "okuyan sorgular. PLE'yi çökerten budur: tek seferde çok sayfa okuyan bir " +
+                "sorgu, önbellekteki her şeyin yerini alır. Toplam okuması büyük ama çağrı " +
+                "başına küçük olan sorgular (günde yüz binlerce kez çalışan ucuz sorgular) " +
+                "PLE'yi düşürmez - o yüzden listede altta kalırlar. Sayılar plan cache'e " +
+                "girildiğinden beri birikimlidir.", ct),
 
             "cpu" => await TopQueriesAsync(conn, "qs.total_worker_time", "cpu",
                 $"Son {LookbackMinutes} dakikada çalışmış, EN ÇOK CPU harcayan sorgular. " +
