@@ -184,11 +184,20 @@ public sealed class CollectorService : BackgroundService
     /// işe yaramaz. Fark hesabının bir sonraki turda da yapılabilmesi için
     /// ham değerlere ihtiyacımız var - o yüzden ayrı bir okuma yapıyoruz.
     /// dm_os_wait_stats ucuz bir DMV, ikinci okuma sorun değil.
+    ///
+    /// PostgreSQL'de birikimli bekleme sayacı yok (yalnızca anlık
+    /// wait_event), saklanacak ham değer de yok - atlanıyor. Bu kontrol
+    /// yokken ReadRawWaitsAsync PG bağlantı dizesini SqlClient'a veriyordu;
+    /// "Keyword not supported: 'host'" ile patlayan tur, arkasındaki olay
+    /// kaydına ve Slack bildirimine hiç ulaşmıyordu.
     /// </summary>
     private static async Task SaveWaitsAsync(
         LiveMonitorService live, MetricStore store, int instanceId,
         DateTime capturedAt, InstanceOptions instance, CancellationToken ct)
     {
+        if (DbEngine.IsPostgres(instance.Engine))
+            return;
+
         var raw = await live.ReadRawWaitsAsync(instance, ct);
         await store.SaveWaitSampleAsync(instanceId, capturedAt, raw, ct);
     }
